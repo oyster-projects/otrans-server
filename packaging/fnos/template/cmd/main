@@ -1,0 +1,64 @@
+#!/bin/bash
+
+PID_FILE="$TRIM_PKGVAR/otransd.pid"
+LOG_FILE="$TRIM_PKGVAR/otransd.log"
+CONFIG_FILE="$TRIM_PKGETC/otrans.conf"
+
+is_running() {
+  [ -f "$PID_FILE" ] || return 1
+  pid="$(cat "$PID_FILE" 2>/dev/null)"
+  [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null
+}
+
+case "$1" in
+  start)
+    if is_running; then
+      exit 0
+    fi
+    if [ ! -f "$CONFIG_FILE" ]; then
+      echo "Missing $CONFIG_FILE" > "$TRIM_TEMP_LOGFILE"
+      exit 1
+    fi
+    # The wizard restricts these values to a safe character set before this file is sourced.
+    source "$CONFIG_FILE"
+    mkdir -p "$TRIM_PKGVAR/data"
+    OTRANS_LISTEN_ADDR="0.0.0.0:$TRIM_SERVICE_PORT" \
+      OTRANS_DATA_DIR="$TRIM_PKGVAR/data" \
+      OTRANS_ADMIN_TOKEN="$OTRANS_ADMIN_TOKEN" \
+      OTRANS_MAX_UPLOAD_BYTES="$OTRANS_MAX_UPLOAD_BYTES" \
+      nohup "$TRIM_APPDEST/otransd" >> "$LOG_FILE" 2>&1 &
+    echo $! > "$PID_FILE"
+    sleep 1
+    if ! is_running; then
+      echo "OTrans failed to start. See $LOG_FILE" > "$TRIM_TEMP_LOGFILE"
+      rm -f "$PID_FILE"
+      exit 1
+    fi
+    ;;
+  stop)
+    if ! is_running; then
+      rm -f "$PID_FILE"
+      exit 0
+    fi
+    pid="$(cat "$PID_FILE")"
+    kill "$pid" 2>/dev/null || true
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+      kill -0 "$pid" 2>/dev/null || break
+      sleep 1
+    done
+    if kill -0 "$pid" 2>/dev/null; then
+      kill -9 "$pid" 2>/dev/null || true
+    fi
+    rm -f "$PID_FILE"
+    ;;
+  status)
+    if is_running; then
+      exit 0
+    fi
+    exit 3
+    ;;
+  *)
+    echo "Usage: $0 {start|stop|status}" > "$TRIM_TEMP_LOGFILE"
+    exit 1
+    ;;
+esac

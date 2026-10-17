@@ -1,0 +1,14 @@
+appname=OTrans
+version=0.4.0
+display_name=OTrans 中转站
+desc=基于飞牛 fnOS 的 OTrans 跨设备文本与文件中转服务。
+source=thirdparty
+platform=@@PLATFORM@@
+maintainer=OTrans
+desktop_uidir=ui
+desktop_applaunchname=OTrans.Application
+ctl_stop=true
+service_port=@@SERVICE_PORT@@
+checkport=true
+disable_authorization_path=true
+changelog=新增免安装网页版，支持配对、文本与文件传送、实时通知、下载校验和全局删除。

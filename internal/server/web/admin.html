@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>OTrans 中转站</title>
+  <link rel="stylesheet" href="/admin/admin.css">
+</head>
+<body>
+  <main class="shell">
+    <header>
+      <div class="brand" aria-hidden="true">↔</div>
+      <div>
+        <p class="eyebrow">FNOS TRANSFER HUB</p>
+        <h1>OTrans 中转站</h1>
+        <p class="subtitle">为手机或电脑生成一次性配对码</p>
+      </div>
+      <div class="header-actions">
+        <span id="health" class="health">正在检查服务…</span>
+        <a class="web-client-link" href="/web/">打开网页版</a>
+      </div>
+    </header>
+
+    <section class="card">
+      <div class="step"><span>1</span><div><strong>输入管理员令牌</strong><small>安装 OTrans FPK 时设置的令牌</small></div></div>
+      <form id="pair-form">
+        <label for="admin-token">管理员令牌</label>
+        <div class="token-row">
+          <input id="admin-token" name="admin-token" type="password" minlength="16" maxlength="128"
+            pattern="[A-Za-z0-9_-]{16,128}" autocomplete="off" spellcheck="false" required
+            placeholder="16–128 位字母、数字、_ 或 -">
+          <button id="toggle-token" class="secondary" type="button" aria-label="显示或隐藏令牌">显示</button>
+        </div>
+        <p class="privacy">令牌只随本次请求发送，页面不会将它保存到浏览器。</p>
+        <button id="generate" class="primary" type="submit">生成临时配对码</button>
+      </form>
+      <p id="error" class="error" role="alert" hidden></p>
+    </section>
+
+    <section id="result" class="card result" hidden>
+      <div class="step"><span>2</span><div><strong>在新设备上输入配对码</strong><small>只能成功使用一次</small></div></div>
+      <div class="code-box">
+        <output id="pair-code" aria-label="配对码"></output>
+        <button id="copy-code" class="secondary" type="button">复制</button>
+      </div>
+      <p id="countdown" class="countdown"></p>
+      <div class="server-address">
+        <span>客户端服务地址</span>
+        <code id="server-address"></code>
+      </div>
+    </section>
+
+    <section class="card transfers-card">
+      <div class="records-heading">
+        <div class="step records-step"><span>3</span><div><strong>中转记录</strong><small>查看飞牛中已提交的内容</small></div></div>
+        <button id="refresh-transfers" class="secondary refresh" type="button">刷新记录</button>
+      </div>
+      <p id="records-status" class="records-status">输入上方管理员令牌后点击“刷新记录”。</p>
+      <div id="records-list" class="records-list"></div>
+    </section>
+
+    <section class="explain">
+      <h2>配对后会发生什么？</h2>
+      <p>配对码在 10 分钟后过期，并且只能使用一次。配对成功后，设备会获得独立的长期令牌，日常上传无需再输入管理员令牌。</p>
+    </section>
+  </main>
+  <script src="/admin/admin.js" defer></script>
+</body>
+</html>

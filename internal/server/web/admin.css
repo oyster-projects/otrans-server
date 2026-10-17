@@ -1,0 +1,154 @@
+:root {
+  color-scheme: light dark;
+  font-family: Inter, "HarmonyOS Sans SC", "Microsoft YaHei", system-ui, sans-serif;
+  background: #eef2ff;
+  color: #182033;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at 15% 0%, rgba(91,101,245,.20), transparent 34rem),
+    radial-gradient(circle at 100% 90%, rgba(39,183,199,.16), transparent 32rem),
+    #f5f7fc;
+}
+
+button, input { font: inherit; }
+
+.shell {
+  width: min(720px, calc(100% - 32px));
+  margin: 0 auto;
+  padding: 56px 0 48px;
+}
+
+header {
+  display: grid;
+  grid-template-columns: 56px 1fr auto;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.brand {
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 17px;
+  color: white;
+  font-size: 30px;
+  font-weight: 800;
+  background: linear-gradient(135deg, #5b65f5, #27b7c7);
+  box-shadow: 0 12px 30px rgba(65,83,220,.28);
+}
+
+.eyebrow { margin: 0 0 3px; color: #65708b; font-size: 11px; font-weight: 800; letter-spacing: .14em; }
+h1 { margin: 0; font-size: clamp(26px, 5vw, 38px); letter-spacing: -.035em; }
+.subtitle { margin: 6px 0 0; color: #65708b; }
+
+.health {
+  padding: 7px 11px;
+  border-radius: 999px;
+  color: #42624c;
+  background: #dcf7e4;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.health.offline { color: #873e3e; background: #ffe2e2; }
+.header-actions { display: flex; align-items: flex-end; gap: 8px; flex-direction: column; }
+.web-client-link {
+  color: #4653d5; font-size: 13px; font-weight: 750; text-decoration: none;
+}
+.web-client-link:hover { text-decoration: underline; }
+
+.card {
+  margin-top: 16px;
+  padding: 24px;
+  border: 1px solid rgba(111,124,158,.16);
+  border-radius: 24px;
+  background: rgba(255,255,255,.88);
+  box-shadow: 0 18px 60px rgba(40,51,92,.09);
+  backdrop-filter: blur(18px);
+}
+
+.step { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
+.step > span {
+  display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%;
+  color: white; background: #5361ed; font-weight: 800;
+}
+.step div { display: grid; gap: 3px; }
+.step small, .privacy, .countdown, .server-address span, .explain { color: #667089; }
+
+label { display: block; margin-bottom: 8px; font-size: 13px; font-weight: 700; }
+.token-row, .code-box { display: flex; gap: 10px; }
+input {
+  min-width: 0; flex: 1; height: 48px; padding: 0 14px;
+  color: inherit; background: #f7f8fc; border: 1px solid #d9deea; border-radius: 13px;
+  outline: none;
+}
+input:focus { border-color: #5965ef; box-shadow: 0 0 0 4px rgba(89,101,239,.12); }
+.privacy { margin: 9px 0 18px; font-size: 12px; }
+
+button { border: 0; border-radius: 13px; cursor: pointer; font-weight: 750; }
+button:disabled { cursor: wait; opacity: .65; }
+.primary { width: 100%; height: 50px; color: white; background: linear-gradient(135deg, #5361ed, #338fcf); }
+.primary:hover { filter: brightness(1.05); }
+.secondary { padding: 0 16px; color: #4653d5; background: #e9ecff; }
+
+.code-box { align-items: stretch; }
+#pair-code {
+  flex: 1; padding: 16px; border: 1px dashed #9aa4c5; border-radius: 15px;
+  background: #f7f8ff; color: #303dbe; text-align: center; font: 800 clamp(28px, 8vw, 44px)/1 ui-monospace, monospace;
+  letter-spacing: .12em;
+}
+.countdown { margin: 12px 0 0; text-align: center; font-size: 13px; }
+.countdown.expired { color: #b44242; font-weight: 700; }
+.server-address { display: grid; gap: 6px; margin-top: 20px; padding-top: 18px; border-top: 1px solid #e7eaf2; }
+.server-address code { overflow-wrap: anywhere; color: #25304b; font-size: 14px; }
+.error { margin: 16px 0 0; padding: 12px 14px; border-radius: 12px; color: #9b3434; background: #ffebeb; }
+.records-heading { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+.records-step { margin-bottom: 0; }
+.refresh { min-height: 40px; white-space: nowrap; }
+.records-status { margin: 16px 0 0; color: #667089; font-size: 13px; }
+.records-list { display: grid; gap: 12px; margin-top: 16px; }
+.record {
+  padding: 16px; border: 1px solid #e1e5f0; border-radius: 16px; background: #fafbfe;
+}
+.record-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.record-title { margin: 0; font-size: 15px; }
+.record-meta { margin: 5px 0 0; color: #778096; font-size: 12px; }
+.record-state { padding: 4px 8px; border-radius: 999px; color: #357147; background: #e0f5e6; font-size: 11px; }
+.record-state.deleted { color: #8b4848; background: #fde6e6; }
+.record-item { margin-top: 12px; padding-top: 12px; border-top: 1px solid #e7eaf2; }
+.record-text { margin: 0; max-height: 180px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: 14px/1.6 ui-monospace, monospace; }
+.record-file { display: flex; justify-content: space-between; gap: 12px; color: #3f4962; font-size: 13px; }
+.explain { margin: 24px 8px 0; line-height: 1.7; font-size: 14px; }
+.explain h2 { margin: 0 0 5px; color: #293149; font-size: 16px; }
+.explain p { margin: 0; }
+
+@media (max-width: 620px) {
+  .shell { width: min(100% - 22px, 720px); padding-top: 24px; }
+  header { grid-template-columns: 48px 1fr; }
+  .brand { width: 48px; height: 48px; border-radius: 14px; }
+  .header-actions { grid-column: 1 / -1; align-items: flex-start; }
+  .health { width: max-content; }
+  .card { padding: 19px; border-radius: 20px; }
+}
+
+@media (prefers-color-scheme: dark) {
+  :root { background: #111522; color: #eef1fa; }
+  body { background: radial-gradient(circle at 15% 0%, rgba(91,101,245,.22), transparent 30rem), #111522; }
+  .card { background: rgba(28,34,51,.90); border-color: #343c55; box-shadow: none; }
+  input { background: #171c2b; border-color: #3c455f; }
+  #pair-code { background: #181e37; color: #aeb6ff; border-color: #5c668a; }
+  .server-address { border-color: #343c55; }
+  .server-address code, .explain h2 { color: #eef1fa; }
+  .record { background: #171c2b; border-color: #343c55; }
+  .record-item { border-color: #343c55; }
+  .record-file { color: #d6daea; }
+  .health { color: #a9efbb; background: #213d2a; }
+  .health.offline { color: #ffb6b6; background: #4a2525; }
+}

@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#111827">
+  <title>OTrans 网页版</title>
+  <link rel="stylesheet" href="./client.css">
+</head>
+<body>
+  <div class="backdrop" aria-hidden="true"></div>
+  <main class="shell">
+    <header class="topbar">
+      <a class="identity" href="./" aria-label="OTrans 网页版首页">
+        <span class="mark" aria-hidden="true">↔</span>
+        <span><b>OTrans</b><small>WEB TRANSFER</small></span>
+      </a>
+      <div class="top-actions">
+        <span id="connection-state" class="status offline"><i></i>未配对</span>
+        <a class="admin-link" href="../admin/">飞牛管理</a>
+      </div>
+    </header>
+
+    <section id="pair-view" class="pair-layout">
+      <div class="welcome">
+        <p class="kicker">无需安装，即开即传</p>
+        <h1>浏览器也能进入<br><em>你的中转站</em></h1>
+        <p>文本、图片和文件仍然只经过自己的飞牛。网页版使用独立设备令牌，不读取其他客户端的令牌。</p>
+        <div class="feature-row">
+          <span>同源连接</span><span>实时通知</span><span>完整性校验</span>
+        </div>
+      </div>
+      <form id="pair-form" class="panel pair-card">
+        <div class="section-heading">
+          <span class="number">01</span>
+          <div><h2>连接这台浏览器</h2><p>先在飞牛管理页生成十分钟配对码</p></div>
+        </div>
+        <label for="device-name">设备名称</label>
+        <input id="device-name" maxlength="80" value="网页浏览器" autocomplete="nickname" required>
+        <label for="pair-code">临时配对码</label>
+        <input id="pair-code" maxlength="32" autocomplete="one-time-code" spellcheck="false" placeholder="输入一次性配对码" required>
+        <label class="remember"><input id="remember-device" type="checkbox" checked> 在这台浏览器中保持登录</label>
+        <button id="pair-button" class="primary" type="submit">连接中转站</button>
+        <p id="pair-error" class="form-error" role="alert" hidden></p>
+      </form>
+    </section>
+
+    <section id="app-view" hidden>
+      <div class="session-bar panel">
+        <div>
+          <span class="eyebrow">当前设备</span>
+          <strong id="current-device">网页浏览器</strong>
+          <small id="server-identity"></small>
+        </div>
+        <div class="session-actions">
+          <button id="notification-button" class="ghost" type="button">开启浏览器通知</button>
+          <button id="disconnect-button" class="ghost danger" type="button">断开配对</button>
+        </div>
+      </div>
+
+      <div class="compose-grid">
+        <section class="panel compose-card">
+          <div class="section-heading">
+            <span class="number">01</span>
+            <div><h2>发送文本</h2><p>可以输入，也可以主动读取当前剪贴板</p></div>
+          </div>
+          <textarea id="text-content" maxlength="1048576" placeholder="输入或粘贴要传送的文字…"></textarea>
+          <div class="action-row">
+            <button id="clipboard-button" class="ghost" type="button">读取剪贴板</button>
+            <button id="send-text-button" class="primary compact" type="button">发送文本</button>
+          </div>
+        </section>
+
+        <section class="panel compose-card">
+          <div class="section-heading">
+            <span class="number">02</span>
+            <div><h2>发送文件</h2><p>最多 9 项，单文件不超过 128 MiB</p></div>
+          </div>
+          <input id="file-input" type="file" multiple hidden>
+          <button id="drop-zone" class="drop-zone" type="button">
+            <span class="drop-icon">＋</span>
+            <strong>拖放文件到这里</strong>
+            <small>或点击选择图片与普通文件</small>
+          </button>
+          <div id="selected-files" class="selected-files"></div>
+          <div class="upload-footer">
+            <span id="upload-status">尚未选择文件</span>
+            <button id="send-files-button" class="primary compact" type="button" disabled>上传所选内容</button>
+          </div>
+        </section>
+      </div>
+
+      <section class="panel records-panel">
+        <div class="records-heading">
+          <div class="section-heading no-margin">
+            <span class="number">03</span>
+            <div><h2>中转站记录</h2><p id="records-status">正在读取记录…</p></div>
+          </div>
+          <button id="refresh-button" class="ghost" type="button">刷新</button>
+        </div>
+        <div id="records-list" class="records-list"></div>
+      </section>
+    </section>
+  </main>
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+  <script src="./client-crypto.js" defer></script>
+  <script src="./client.js" defer></script>
+</body>
+</html>

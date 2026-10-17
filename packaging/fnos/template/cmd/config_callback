@@ -1,0 +1,14 @@
+#!/bin/bash
+
+set -eu
+umask 077
+
+if [ -z "${wizard_admin_token:-}" ]; then
+  echo "Admin token is required." > "$TRIM_TEMP_LOGFILE"
+  exit 1
+fi
+
+cat > "$TRIM_PKGETC/otrans.conf" <<EOF
+OTRANS_ADMIN_TOKEN=$wizard_admin_token
+OTRANS_MAX_UPLOAD_BYTES=${wizard_max_upload_bytes:-4294967296}
+EOF

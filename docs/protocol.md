@@ -1,0 +1,86 @@
+# OTrans 同步协议 v2
+
+OTrans-FN 是数据权威中心。v2 允许客户端保存同一台服务器的内网、外网两个 HTTP(S) 地址，并始终优先尝试内网。客户端通过持久化的 `serverId` 防止两个地址误指向不同服务器。
+
+## 核心对象
+
+- **Device**：一台已配对客户端。每台设备拥有独立令牌、同步模式和事件游标。
+- **Transfer**：用户的一次中转操作，可同时包含文本和多个文件。
+- **Blob**：按 SHA-256 寻址的文件内容。相同内容只保存一份。
+- **Event**：严格递增的变更记录，目前包括 `transfer.created` 和 `transfer.deleted`。
+
+## 配对
+
+1. 管理员使用安装时设置的 `OTRANS_ADMIN_TOKEN` 请求 `POST /api/v1/admin/pair-codes`。
+2. 服务返回一个十分钟有效、仅可使用一次的配对码。
+3. 手机或 Windows 调用 `POST /api/v1/pair`，获得设备令牌。
+4. 后续请求统一使用 `Authorization: Bearer <device-token>`。
+
+设备令牌只在配对成功时返回一次，服务端仅保存其 SHA-256 摘要。
+
+## 上传事务
+
+1. 客户端先计算每个文件的 SHA-256 和字节数。
+2. `POST /api/v1/transfers` 创建草稿，并附带当前设备生成的 `clientTransferId`。响应中的 `missingBlobs` 表示服务端尚未拥有的内容。同一设备重复提交相同 `clientTransferId` 时返回原草稿或已提交记录。
+3. 对每个缺失内容调用 `PUT /api/v1/blobs/{sha256}`，请求体为原始文件字节。
+4. 调用 `POST /api/v1/transfers/{id}/commit`。只有全部 Blob 都存在且长度匹配时才能提交。
+5. 提交成功后服务端生成一次 `transfer.created` 事件，其他设备即可拉取；重复提交同一记录不会重复生成事件。
+
+当前 v1 的单 Blob 上传是完整 `PUT`；后续可以增加分块会话而不改变 Transfer 和 Event 模型。下载通过标准 HTTP Range 自动支持断点续传。
+
+## 实时通知与增量同步
+
+Windows 客户端先使用设备令牌调用 `POST /api/v1/ws-ticket`，再用返回的 30 秒一次性票据连接：
+
+```text
+GET /api/v1/ws?ticket=<one-time-ticket>
+```
+
+WebSocket 只通知 `events.available` 和最新事件序号，不直接承载文件或完整事件。连接建立、断线重连、系统休眠恢复后，客户端都必须继续按持久化游标调用 HTTP 事件接口，因此通知丢失不会造成数据丢失。
+
+客户端调用：
+
+```text
+GET /api/v1/events?after=<last-sequence>&limit=100
+```
+
+按顺序处理完成后调用：
+
+```text
+PUT /api/v1/devices/me/cursor
+{"cursor": 123}
+```
+
+客户端必须把文件保存到临时文件、校验 SHA-256，再原子移动到 Inbox，避免程序中断后留下半个文件。
+
+## 删除
+
+`DELETE /api/v1/transfers/{id}` 会：
+
+1. 标记 Transfer 已删除。
+2. 生成 `transfer.deleted` 事件。
+3. 立即清理没有被其他有效 Transfer 引用的 Blob。
+4. 客户端收到事件后，删除自己管理的 Inbox/缓存副本。
+
+用户已经复制或移动到 OTrans 管理目录之外的文件不在同步删除范围内。
+
+## v2 HTTP 端点
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/healthz` | 健康检查 |
+| GET | `/api/v1/server-info` | 返回持久化 `serverId` 和协议版本 |
+| POST | `/api/v1/admin/pair-codes` | 创建一次性配对码 |
+| POST | `/api/v1/pair` | 设备配对 |
+| GET | `/api/v1/devices/me` | 当前设备信息 |
+| PUT | `/api/v1/devices/me/cursor` | 提交同步游标 |
+| POST | `/api/v1/transfers` | 创建上传草稿 |
+| PUT | `/api/v1/blobs/{sha256}` | 上传文件实体 |
+| POST | `/api/v1/transfers/{id}/commit` | 提交中转记录 |
+| GET | `/api/v1/transfers` | 查询当前记录 |
+| GET | `/api/v1/transfers/{id}` | 查询一条记录 |
+| DELETE | `/api/v1/transfers/{id}` | 全局删除 |
+| GET | `/api/v1/blobs/{sha256}` | 下载文件实体，支持 Range |
+| GET | `/api/v1/events` | 拉取增量事件 |
+| POST | `/api/v1/ws-ticket` | 创建 30 秒一次性 WebSocket 票据 |
+| GET | `/api/v1/ws` | 建立实时事件通知连接 |

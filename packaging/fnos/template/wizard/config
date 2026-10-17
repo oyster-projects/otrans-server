@@ -1,0 +1,39 @@
+[
+  {
+    "stepTitle": "OTrans 服务设置",
+    "items": [
+      {
+        "type": "password",
+        "field": "wizard_admin_token",
+        "label": "新管理员令牌",
+        "desc": "保存后旧令牌立即失效。",
+        "rules": [
+          {
+            "required": true,
+            "message": "请输入管理员令牌"
+          },
+          {
+            "pattern": "^[A-Za-z0-9_-]{16,128}$",
+            "message": "令牌必须为 16-128 位字母、数字、下划线或短横线"
+          }
+        ]
+      },
+      {
+        "type": "text",
+        "field": "wizard_max_upload_bytes",
+        "label": "单文件上传上限（字节）",
+        "initValue": "4294967296",
+        "rules": [
+          {
+            "required": true,
+            "message": "请输入上传上限"
+          },
+          {
+            "pattern": "^[1-9][0-9]{0,12}$",
+            "message": "请输入正整数"
+          }
+        ]
+      }
+    ]
+  }
+]
