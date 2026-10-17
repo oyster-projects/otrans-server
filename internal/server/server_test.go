@@ -318,6 +318,67 @@ func TestWebPlatformCanPair(t *testing.T) {
 	}
 }
 
+func TestLANPeerDiscoveryAndTicketRedemption(t *testing.T) {
+	t.Parallel()
+	tempDir := t.TempDir()
+	dataStore, err := store.Open(filepath.Join(tempDir, "otrans.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = dataStore.Close() })
+	api, err := server.New(server.Config{
+		AdminToken: testAdminToken, BlobDir: filepath.Join(tempDir, "blobs"), MaxUploadBytes: 1024,
+	}, dataStore, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpServer := httptest.NewServer(api.Handler())
+	t.Cleanup(httpServer.Close)
+	source := pairTestDevice(t, httpServer.URL, "Seeder PC", "windows")
+	receiver := pairTestDevice(t, httpServer.URL, "Receiver PC", "windows")
+	digestBytes := sha256.Sum256([]byte("peer content"))
+	digest := hex.EncodeToString(digestBytes[:])
+
+	announce := source.requestJSON(http.MethodPost, "/api/v1/lan/announce", map[string]any{
+		"addresses": []string{"http://192.168.1.25:49831"},
+		"digests":   []string{digest},
+	})
+	assertStatus(t, announce, http.StatusOK)
+	announce.Body.Close()
+
+	sourcesResponse := receiver.request(http.MethodGet, "/api/v1/lan/sources/"+digest, nil, nil)
+	assertStatus(t, sourcesResponse, http.StatusOK)
+	var sources struct {
+		Sources []struct {
+			DeviceName string   `json:"deviceName"`
+			Addresses  []string `json:"addresses"`
+			Ticket     string   `json:"ticket"`
+		} `json:"sources"`
+	}
+	decodeResponse(t, sourcesResponse, &sources)
+	if len(sources.Sources) != 1 || sources.Sources[0].DeviceName != "Seeder PC" ||
+		len(sources.Sources[0].Addresses) != 1 || sources.Sources[0].Ticket == "" {
+		t.Fatalf("unexpected peer sources: %#v", sources.Sources)
+	}
+
+	redeem := source.requestJSON(http.MethodPost, "/api/v1/lan/tickets/redeem", map[string]string{
+		"ticket": sources.Sources[0].Ticket, "digest": digest,
+	})
+	assertStatus(t, redeem, http.StatusNoContent)
+	redeem.Body.Close()
+	repeated := source.requestJSON(http.MethodPost, "/api/v1/lan/tickets/redeem", map[string]string{
+		"ticket": sources.Sources[0].Ticket, "digest": digest,
+	})
+	assertStatus(t, repeated, http.StatusUnauthorized)
+	repeated.Body.Close()
+
+	publicAddress := source.requestJSON(http.MethodPost, "/api/v1/lan/announce", map[string]any{
+		"addresses": []string{"http://8.8.8.8:49831"}, "digests": []string{digest},
+	})
+	assertStatus(t, publicAddress, http.StatusBadRequest)
+	publicAddress.Body.Close()
+}
+
 func TestRejectsWrongBlobDigest(t *testing.T) {
 	t.Parallel()
 	tempDir := t.TempDir()

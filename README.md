@@ -16,6 +16,7 @@ OTrans 的飞牛 fnOS 中心服务。它保存中转记录和文件实体，并�
 - HTTP Range 下载
 - SQLite 单机存储，适合家庭 NAS
 - 同端口网页版，支持配对、文本与文件传送、下载校验及全局删除
+- v0.5 实验性局域网文件源发现与 30 秒一次性票据；接收端直连失败时继续从飞牛下载
 
 ## 本地启动
 
@@ -35,6 +36,8 @@ go run ./cmd/otransd
 
 网页版与 API、WebSocket 共用同一个服务端口，不需要额外映射端口。首次使用时在管理页生成一次性配对码，再在网页版完成配对。浏览器令牌只保存在当前浏览器的本地或会话存储中。
 
+局域网直传也不会增加飞牛的映射端口：飞牛仍只使用一个服务端口。开启实验功能的 Windows 客户端在各自局域网监听 `49831`，该端口仅供同网设备直接取文件，不应映射到公网。文件和记录仍以飞牛为权威副本，局域网节点不可用时自动回退飞牛。
+
 ## 获取第一个设备令牌
 
 ```powershell
@@ -44,7 +47,7 @@ $body = @{ code = $pair.code; name = 'My PC'; platform = 'windows' } | ConvertTo
 Invoke-RestMethod -Method Post -Uri 'http://127.0.0.1:8080/api/v1/pair' -ContentType 'application/json' -Body $body
 ```
 
-完整同步流程见 [docs/protocol.md](docs/protocol.md)。v0.3 及更新客户端需要先通过 `GET /api/v1/server-info` 确认服务器身份。
+完整同步流程见 [docs/protocol.md](docs/protocol.md)。v0.3 及更新客户端需要先通过 `GET /api/v1/server-info` 确认服务器身份；v0.5 的局域网实验功能要求协议版本 3。
 
 ## FPK 打包
 

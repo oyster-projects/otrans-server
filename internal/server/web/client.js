@@ -357,14 +357,56 @@ async function handleRecordAction(event) {
   }
   setBusy(button, true, '校验中…');
   try {
-    const response = await authorizedFetch(`blobs/${encodeURIComponent(item.sha256)}?name=${encodeURIComponent(item.name || 'file')}`);
-    if (!response.ok) throw await responseError(response);
-    const blob = await response.blob();
-    if (blob.size !== Number(item.size) || await sha256(blob) !== String(item.sha256).toLowerCase()) throw new Error('文件完整性校验失败');
+    const download = await downloadBlobPreferLan(item);
+    const blob = download.blob;
     const url = URL.createObjectURL(blob); const link = document.createElement('a'); link.href = url; link.download = item.name || 'download'; link.click();
     window.setTimeout(() => URL.revokeObjectURL(url), 30000);
+    showToast(download.route === 'lan' ? `已从 ${download.sourceName || '局域网设备'} 直传下载` : '已从飞牛下载');
   } catch (error) { showToast(errorMessage(error)); }
   finally { setBusy(button, false, '下载'); }
+}
+
+async function downloadBlobPreferLan(item) {
+  try {
+    const peers = await request(`lan/sources/${encodeURIComponent(item.sha256)}`);
+    for (const source of peers.sources || []) {
+      for (const address of source.addresses || []) {
+        try {
+          const peerUrl = new URL(`v1/blobs/${encodeURIComponent(item.sha256)}?ticket=${encodeURIComponent(source.ticket)}`, `${address.replace(/\/+$/, '')}/`);
+          const blob = await fetchPeerBlob(peerUrl, item);
+          return { blob, route: 'lan', sourceName: source.deviceName };
+        } catch (_) { /* 节点可能休眠、换网或被防火墙拦截，继续尝试。 */ }
+      }
+    }
+  } catch (_) { /* 兼容旧服务端或浏览器阻止 HTTPS 页面访问 HTTP 局域网节点。 */ }
+
+  const response = await authorizedFetch(`blobs/${encodeURIComponent(item.sha256)}?name=${encodeURIComponent(item.name || 'file')}`);
+  if (!response.ok) throw await responseError(response);
+  const blob = await response.blob();
+  await validateBlob(blob, item);
+  return { blob, route: 'nas' };
+}
+
+async function fetchPeerBlob(url, item) {
+  const controller = new AbortController();
+  let timer = window.setTimeout(() => controller.abort(), 1800);
+  try {
+    const response = await fetch(url, { cache: 'no-store', signal: controller.signal });
+    window.clearTimeout(timer);
+    if (!response.ok) throw new Error(`局域网设备返回 ${response.status}`);
+    timer = window.setTimeout(() => controller.abort(), 180000);
+    const blob = await response.blob();
+    await validateBlob(blob, item);
+    return blob;
+  } finally {
+    window.clearTimeout(timer);
+  }
+}
+
+async function validateBlob(blob, item) {
+  if (blob.size !== Number(item.size) || await sha256(blob) !== String(item.sha256).toLowerCase()) {
+    throw new Error('文件完整性校验失败');
+  }
 }
 
 async function readClipboard() {

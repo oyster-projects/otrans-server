@@ -1,6 +1,6 @@
-# OTrans 同步协议 v2
+# OTrans 同步协议 v3
 
-OTrans-FN 是数据权威中心。v2 允许客户端保存同一台服务器的内网、外网两个 HTTP(S) 地址，并始终优先尝试内网。客户端通过持久化的 `serverId` 防止两个地址误指向不同服务器。
+OTrans-FN 是数据权威中心。v2 允许客户端保存同一台服务器的内网、外网两个 HTTP(S) 地址，并始终优先尝试内网。v3 增加实验性局域网文件源发现；客户端通过持久化的 `serverId` 防止两个地址误指向不同服务器。
 
 ## 核心对象
 
@@ -53,6 +53,14 @@ PUT /api/v1/devices/me/cursor
 
 客户端必须把文件保存到临时文件、校验 SHA-256，再原子移动到 Inbox，避免程序中断后留下半个文件。
 
+## 实验性局域网直传
+
+局域网直传只优化文件下载，不替代飞牛的上传、记录、事件或删除流程：发送方仍先把 Blob 上传飞牛，再将本机已有的摘要和私网 HTTP 地址登记到 `POST /api/v1/lan/announce`。登记有效 90 秒，Windows 客户端每 45 秒续期。
+
+接收方按摘要请求 `GET /api/v1/lan/sources/{sha256}`。飞牛只返回其他设备登记的私网、环回或链路本地 IP 地址，并为每个来源签发 30 秒一次性票据。接收方使用票据向来源设备的 `/v1/blobs/{sha256}` 获取内容；来源设备通过 `POST /api/v1/lan/tickets/redeem` 向飞牛核销票据后才发送文件。
+
+接收方必须重新校验字节数和 SHA-256。节点不可达、票据过期、校验失败或浏览器安全策略阻止访问时，应直接回退 `GET /api/v1/blobs/{sha256}`。Windows 节点默认监听局域网端口 `49831`，该端口不需要也不应映射到公网；飞牛仍只需映射一个服务端口。
+
 ## 删除
 
 `DELETE /api/v1/transfers/{id}` 会：
@@ -64,7 +72,7 @@ PUT /api/v1/devices/me/cursor
 
 用户已经复制或移动到 OTrans 管理目录之外的文件不在同步删除范围内。
 
-## v2 HTTP 端点
+## v3 HTTP 端点
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
@@ -84,3 +92,6 @@ PUT /api/v1/devices/me/cursor
 | GET | `/api/v1/events` | 拉取增量事件 |
 | POST | `/api/v1/ws-ticket` | 创建 30 秒一次性 WebSocket 票据 |
 | GET | `/api/v1/ws` | 建立实时事件通知连接 |
+| POST | `/api/v1/lan/announce` | 登记当前设备可提供的局域网地址和 Blob 摘要 |
+| GET | `/api/v1/lan/sources/{sha256}` | 查询局域网来源并签发短期一次性票据 |
+| POST | `/api/v1/lan/tickets/redeem` | 来源设备核销一次性下载票据 |

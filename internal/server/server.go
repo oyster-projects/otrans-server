@@ -43,6 +43,7 @@ type Server struct {
 	serverID string
 	tickets  *ticketManager
 	hub      *eventHub
+	peers    *peerManager
 }
 
 type contextKey string
@@ -77,7 +78,7 @@ func New(config Config, dataStore *store.Store, logger *slog.Logger) (*Server, e
 	}
 	server := &Server{
 		config: config, store: dataStore, log: logger, mux: http.NewServeMux(),
-		serverID: serverID, tickets: newTicketManager(), hub: newEventHub(),
+		serverID: serverID, tickets: newTicketManager(), hub: newEventHub(), peers: newPeerManager(),
 	}
 	server.routes()
 	return server, nil
@@ -111,6 +112,9 @@ func (s *Server) routes() {
 	s.mux.Handle("GET /api/v1/events", s.requireDevice(http.HandlerFunc(s.handleEvents)))
 	s.mux.Handle("POST /api/v1/ws-ticket", s.requireDevice(http.HandlerFunc(s.handleCreateWebSocketTicket)))
 	s.mux.HandleFunc("GET /api/v1/ws", s.handleWebSocket)
+	s.mux.Handle("POST /api/v1/lan/announce", s.requireDevice(http.HandlerFunc(s.handlePeerAnnounce)))
+	s.mux.Handle("GET /api/v1/lan/sources/{digest}", s.requireDevice(http.HandlerFunc(s.handlePeerSources)))
+	s.mux.Handle("POST /api/v1/lan/tickets/redeem", s.requireDevice(http.HandlerFunc(s.handlePeerTicketRedeem)))
 }
 
 func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
@@ -179,7 +183,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 
 func (s *Server) handleServerInfo(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
-		"serverId": s.serverID, "protocolVersion": 2,
+		"serverId": s.serverID, "protocolVersion": 3,
 	})
 }
 
