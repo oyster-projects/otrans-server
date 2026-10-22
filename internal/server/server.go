@@ -16,6 +16,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -178,7 +179,9 @@ func (s *Server) serveWebFile(w http.ResponseWriter, name string, contentType st
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status": "ok", "activeRealtimeConnections": s.hub.count(), "goroutines": runtime.NumGoroutine(),
+	})
 }
 
 func (s *Server) handleServerInfo(w http.ResponseWriter, _ *http.Request) {

@@ -38,6 +38,8 @@ GET /api/v1/ws?ticket=<one-time-ticket>
 
 WebSocket 只通知 `events.available` 和最新事件序号，不直接承载文件或完整事件。连接建立、断线重连、系统休眠恢复后，客户端都必须继续按持久化游标调用 HTTP 事件接口，因此通知丢失不会造成数据丢失。
 
+服务端以设备 ID 为键只保留一个 WebSocket。相同设备建立新连接时，服务端必须立即关闭此前连接，避免休眠恢复、网络切换或客户端异常退出留下重复连接。`GET /healthz` 同时返回 `activeRealtimeConnections` 与 `goroutines`，供管理页观察连接和协程是否稳定。
+
 客户端调用：
 
 ```text

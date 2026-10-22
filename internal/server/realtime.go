@@ -58,34 +58,66 @@ func (m *ticketManager) redeem(token string) (webSocketTicket, bool) {
 }
 
 type webSocketClient struct {
-	updates chan int64
+	deviceID   string
+	updates    chan int64
+	stop       chan struct{}
+	stopOnce   sync.Once
+	connection *websocket.Conn
+}
+
+func newWebSocketClient(deviceID string, connection *websocket.Conn) *webSocketClient {
+	return &webSocketClient{
+		deviceID: deviceID, updates: make(chan int64, 1), stop: make(chan struct{}), connection: connection,
+	}
+}
+
+func (c *webSocketClient) close() {
+	c.stopOnce.Do(func() {
+		close(c.stop)
+		_ = c.connection.Close()
+	})
 }
 
 type eventHub struct {
 	mu      sync.Mutex
-	clients map[*webSocketClient]struct{}
+	clients map[string]*webSocketClient
 }
 
 func newEventHub() *eventHub {
-	return &eventHub{clients: make(map[*webSocketClient]struct{})}
+	return &eventHub{clients: make(map[string]*webSocketClient)}
 }
 
-func (h *eventHub) register(client *webSocketClient) {
+func (h *eventHub) register(client *webSocketClient) bool {
 	h.mu.Lock()
-	defer h.mu.Unlock()
-	h.clients[client] = struct{}{}
+	previous := h.clients[client.deviceID]
+	h.clients[client.deviceID] = client
+	h.mu.Unlock()
+	if previous != nil && previous != client {
+		previous.close()
+		return true
+	}
+	return false
 }
 
 func (h *eventHub) unregister(client *webSocketClient) {
 	h.mu.Lock()
+	if h.clients[client.deviceID] == client {
+		delete(h.clients, client.deviceID)
+	}
+	h.mu.Unlock()
+	client.close()
+}
+
+func (h *eventHub) count() int {
+	h.mu.Lock()
 	defer h.mu.Unlock()
-	delete(h.clients, client)
+	return len(h.clients)
 }
 
 func (h *eventHub) broadcast(sequence int64) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	for client := range h.clients {
+	for _, client := range h.clients {
 		select {
 		case client.updates <- sequence:
 		default:
@@ -133,10 +165,10 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		return
 	}
-	defer connection.Close()
-
-	client := &webSocketClient{updates: make(chan int64, 1)}
-	s.hub.register(client)
+	client := newWebSocketClient(ticket.deviceID, connection)
+	if s.hub.register(client) {
+		s.log.Info("replaced stale realtime connection", "deviceId", ticket.deviceID)
+	}
 	defer s.hub.unregister(client)
 	latest, err := s.store.LatestEventSequence(r.Context())
 	if err != nil {
@@ -145,12 +177,11 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 	client.updates <- latest
 
-	stopWriter := make(chan struct{})
 	writerDone := make(chan struct{})
 	go func() {
 		defer close(writerDone)
-		defer connection.Close()
-		s.webSocketWriteLoop(connection, client, stopWriter)
+		defer client.close()
+		s.webSocketWriteLoop(connection, client)
 	}()
 
 	connection.SetReadLimit(8 * 1024)
@@ -163,11 +194,11 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 	}
-	close(stopWriter)
+	client.close()
 	<-writerDone
 }
 
-func (s *Server) webSocketWriteLoop(connection *websocket.Conn, client *webSocketClient, stop <-chan struct{}) {
+func (s *Server) webSocketWriteLoop(connection *websocket.Conn, client *webSocketClient) {
 	ping := time.NewTicker(25 * time.Second)
 	defer ping.Stop()
 	for {
@@ -184,7 +215,7 @@ func (s *Server) webSocketWriteLoop(connection *websocket.Conn, client *webSocke
 			if err := connection.WriteMessage(websocket.PingMessage, nil); err != nil {
 				return
 			}
-		case <-stop:
+		case <-client.stop:
 			return
 		}
 	}

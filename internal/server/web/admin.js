@@ -17,15 +17,21 @@ let countdownTimer = 0;
 
 serverAddress.textContent = window.location.origin;
 
-fetch('/healthz', { cache: 'no-store' })
-  .then((response) => {
+async function refreshHealth() {
+  try {
+    const response = await fetch('/healthz', { cache: 'no-store' });
     if (!response.ok) throw new Error('offline');
-    health.textContent = '服务正常';
-  })
-  .catch(() => {
+    const payload = await response.json();
+    health.textContent = `服务正常 · 实时连接 ${payload.activeRealtimeConnections ?? 0} · 协程 ${payload.goroutines ?? '-'}`;
+    health.classList.remove('offline');
+  } catch (_) {
     health.textContent = '服务异常';
     health.classList.add('offline');
-  });
+  }
+}
+
+void refreshHealth();
+window.setInterval(refreshHealth, 10000);
 
 toggleButton.addEventListener('click', () => {
   const show = tokenInput.type === 'password';

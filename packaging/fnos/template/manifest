@@ -1,5 +1,5 @@
 appname=OTrans
-version=0.5.0
+version=0.5.1
 display_name=OTrans 中转站
 desc=基于飞牛 fnOS 的 OTrans 跨设备文本与文件中转服务。
 source=thirdparty
@@ -11,4 +11,4 @@ ctl_stop=true
 service_port=@@SERVICE_PORT@@
 checkport=true
 disable_authorization_path=true
-changelog=新增实验性局域网文件源发现与短期票据，接收端可直连 Windows，失败自动回退飞牛。
+changelog=限制每台设备仅保留一个实时连接，主动关闭重连遗留连接，并在管理页显示实时连接数与协程数。

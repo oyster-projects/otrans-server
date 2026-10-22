@@ -218,6 +218,71 @@ func TestWebSocketSignalsAvailableEvents(t *testing.T) {
 	}
 }
 
+func TestWebSocketReplacesPreviousConnectionForSameDevice(t *testing.T) {
+	t.Parallel()
+	tempDir := t.TempDir()
+	dataStore, err := store.Open(filepath.Join(tempDir, "otrans.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = dataStore.Close() })
+	api, err := server.New(server.Config{
+		AdminToken: testAdminToken, BlobDir: filepath.Join(tempDir, "blobs"), MaxUploadBytes: 1024,
+	}, dataStore, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpServer := httptest.NewServer(api.Handler())
+	t.Cleanup(httpServer.Close)
+	client := pairTestDevice(t, httpServer.URL, "Single Realtime PC", "windows")
+
+	dial := func() *websocket.Conn {
+		t.Helper()
+		ticketResponse := client.request(http.MethodPost, "/api/v1/ws-ticket", nil, nil)
+		assertStatus(t, ticketResponse, http.StatusCreated)
+		var ticket struct {
+			Ticket string `json:"ticket"`
+		}
+		decodeResponse(t, ticketResponse, &ticket)
+		connection, _, dialErr := websocket.DefaultDialer.Dial(
+			strings.Replace(httpServer.URL, "http://", "ws://", 1)+"/api/v1/ws?ticket="+ticket.Ticket, nil)
+		if dialErr != nil {
+			t.Fatal(dialErr)
+		}
+		_ = connection.SetReadDeadline(time.Now().Add(3 * time.Second))
+		var initial map[string]any
+		if readErr := connection.ReadJSON(&initial); readErr != nil {
+			_ = connection.Close()
+			t.Fatal(readErr)
+		}
+		return connection
+	}
+
+	first := dial()
+	t.Cleanup(func() { _ = first.Close() })
+	second := dial()
+	t.Cleanup(func() { _ = second.Close() })
+
+	_ = first.SetReadDeadline(time.Now().Add(time.Second))
+	if _, _, readErr := first.ReadMessage(); readErr == nil {
+		t.Fatal("previous realtime connection remained open after replacement")
+	}
+
+	healthResponse := client.request(http.MethodGet, "/healthz", nil, nil)
+	assertStatus(t, healthResponse, http.StatusOK)
+	var health struct {
+		ActiveRealtimeConnections int `json:"activeRealtimeConnections"`
+		Goroutines                int `json:"goroutines"`
+	}
+	decodeResponse(t, healthResponse, &health)
+	if health.ActiveRealtimeConnections != 1 {
+		t.Fatalf("expected one realtime connection, got %d", health.ActiveRealtimeConnections)
+	}
+	if health.Goroutines < 1 {
+		t.Fatalf("expected positive goroutine count, got %d", health.Goroutines)
+	}
+}
+
 func TestAdminPage(t *testing.T) {
 	t.Parallel()
 	tempDir := t.TempDir()
