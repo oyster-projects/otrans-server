@@ -8,15 +8,19 @@ import (
 	"strings"
 )
 
-const defaultMaxUploadBytes int64 = 4 * 1024 * 1024 * 1024
+const (
+	defaultMaxUploadBytes  int64 = 4 * 1024 * 1024 * 1024
+	defaultMaxStorageBytes int64 = 100 * 1024 * 1024 * 1024
+)
 
 type Config struct {
-	ListenAddr     string
-	DataDir        string
-	DatabasePath   string
-	BlobDir        string
-	AdminToken     string
-	MaxUploadBytes int64
+	ListenAddr      string
+	DataDir         string
+	DatabasePath    string
+	BlobDir         string
+	AdminToken      string
+	MaxUploadBytes  int64
+	MaxStorageBytes int64
 }
 
 func Load() (Config, error) {
@@ -39,14 +43,26 @@ func Load() (Config, error) {
 		}
 		maxUploadBytes = parsed
 	}
+	maxStorageBytes := defaultMaxStorageBytes
+	if raw := strings.TrimSpace(os.Getenv("OTRANS_MAX_STORAGE_BYTES")); raw != "" {
+		parsed, parseErr := strconv.ParseInt(raw, 10, 64)
+		if parseErr != nil || parsed <= 0 {
+			return Config{}, errors.New("OTRANS_MAX_STORAGE_BYTES must be a positive integer")
+		}
+		maxStorageBytes = parsed
+	}
+	if maxStorageBytes < maxUploadBytes {
+		return Config{}, errors.New("OTRANS_MAX_STORAGE_BYTES must be greater than or equal to OTRANS_MAX_UPLOAD_BYTES")
+	}
 
 	return Config{
-		ListenAddr:     envOrDefault("OTRANS_LISTEN_ADDR", ":8080"),
-		DataDir:        dataDir,
-		DatabasePath:   filepath.Join(dataDir, "otrans.db"),
-		BlobDir:        filepath.Join(dataDir, "blobs"),
-		AdminToken:     adminToken,
-		MaxUploadBytes: maxUploadBytes,
+		ListenAddr:      envOrDefault("OTRANS_LISTEN_ADDR", ":8080"),
+		DataDir:         dataDir,
+		DatabasePath:    filepath.Join(dataDir, "otrans.db"),
+		BlobDir:         filepath.Join(dataDir, "blobs"),
+		AdminToken:      adminToken,
+		MaxUploadBytes:  maxUploadBytes,
+		MaxStorageBytes: maxStorageBytes,
 	}, nil
 }
 

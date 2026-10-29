@@ -10,9 +10,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/otrans-app/otrans-fn/internal/config"
-	"github.com/otrans-app/otrans-fn/internal/server"
-	"github.com/otrans-app/otrans-fn/internal/store"
+	"github.com/oyster-projects/otrans-server/internal/config"
+	"github.com/oyster-projects/otrans-server/internal/server"
+	"github.com/oyster-projects/otrans-server/internal/store"
 )
 
 func main() {
@@ -36,20 +36,28 @@ func main() {
 
 	api, err := server.New(server.Config{
 		AdminToken: config.AdminToken, BlobDir: config.BlobDir, MaxUploadBytes: config.MaxUploadBytes,
+		MaxStorageBytes: config.MaxStorageBytes,
 	}, dataStore, logger)
 	if err != nil {
 		logger.Error("cannot initialize server", "error", err)
 		os.Exit(1)
 	}
+	defer func() {
+		if err := api.Close(); err != nil {
+			logger.Error("cannot close blob storage", "error", err)
+		}
+	}()
 
 	httpServer := &http.Server{
 		Addr:              config.ListenAddr,
 		Handler:           api.Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       90 * time.Second,
+		MaxHeaderBytes:    64 * 1024,
 	}
 	shutdownSignals, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	go api.RunMaintenance(shutdownSignals)
 	go func() {
 		<-shutdownSignals.Done()
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)

@@ -26,6 +26,7 @@ case "$1" in
       OTRANS_DATA_DIR="$TRIM_PKGVAR/data" \
       OTRANS_ADMIN_TOKEN="$OTRANS_ADMIN_TOKEN" \
       OTRANS_MAX_UPLOAD_BYTES="$OTRANS_MAX_UPLOAD_BYTES" \
+      OTRANS_MAX_STORAGE_BYTES="$OTRANS_MAX_STORAGE_BYTES" \
       nohup "$TRIM_APPDEST/otransd" >> "$LOG_FILE" 2>&1 &
     echo $! > "$PID_FILE"
     sleep 1

@@ -21,7 +21,10 @@ var (
 	ErrNotFound       = errors.New("not found")
 	ErrConflict       = errors.New("conflict")
 	ErrInvalidPairing = errors.New("invalid or expired pairing code")
+	ErrLimitExceeded  = errors.New("device has too many unfinished transfers")
 )
+
+const maxDraftTransfersPerDevice = 128
 
 type Store struct {
 	db  *sql.DB
@@ -109,7 +112,7 @@ func Open(path string) (*Store, error) {
 	db.SetMaxOpenConns(1)
 	store := &Store{db: db, now: time.Now}
 	if err := store.migrate(context.Background()); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, err
 	}
 	return store, nil
@@ -208,7 +211,7 @@ func (s *Store) ensureColumn(ctx context.Context, table string, column string, d
 		var defaultValue sql.NullString
 		var primaryKey int
 		if err := rows.Scan(&cid, &name, &dataType, &notNull, &defaultValue, &primaryKey); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return err
 		}
 		if name == column {
@@ -247,6 +250,11 @@ func (s *Store) ServerID(ctx context.Context) (string, error) {
 }
 
 func (s *Store) CreatePairingCode(ctx context.Context, ttl time.Duration) (PairingCode, error) {
+	now := formatTime(s.now().UTC())
+	if _, err := s.db.ExecContext(ctx,
+		`DELETE FROM pairing_codes WHERE used_at IS NOT NULL OR julianday(expires_at) <= julianday(?)`, now); err != nil {
+		return PairingCode{}, err
+	}
 	raw := make([]byte, 8)
 	if _, err := rand.Read(raw); err != nil {
 		return PairingCode{}, err
@@ -337,6 +345,50 @@ FROM devices WHERE token_hash = ?`, hashSecret(token)).Scan(
 	return device, nil
 }
 
+func (s *Store) ListDevices(ctx context.Context, includeRevoked bool) ([]Device, error) {
+	query := `SELECT id, name, platform, sync_mode, cursor, created_at, last_seen_at, revoked_at FROM devices`
+	if !includeRevoked {
+		query += ` WHERE revoked_at IS NULL`
+	}
+	query += ` ORDER BY revoked_at IS NOT NULL, last_seen_at DESC`
+	rows, err := s.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	devices := make([]Device, 0)
+	for rows.Next() {
+		var device Device
+		var revoked sql.NullString
+		if err := rows.Scan(&device.ID, &device.Name, &device.Platform, &device.SyncMode, &device.Cursor,
+			&device.CreatedAt, &device.LastSeenAt, &revoked); err != nil {
+			return nil, err
+		}
+		if revoked.Valid {
+			value := revoked.String
+			device.RevokedAt = &value
+		}
+		devices = append(devices, device)
+	}
+	return devices, rows.Err()
+}
+
+func (s *Store) RevokeDevice(ctx context.Context, deviceID string) error {
+	result, err := s.db.ExecContext(ctx,
+		`UPDATE devices SET revoked_at = COALESCE(revoked_at, ?) WHERE id = ?`, formatTime(s.now().UTC()), deviceID)
+	if err != nil {
+		return err
+	}
+	updated, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if updated == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (s *Store) CreateTransfer(ctx context.Context, sourceDeviceID string, input CreateTransfer) (Transfer, []string, error) {
 	if input.ClientTransferID != "" {
 		var existingID string
@@ -354,6 +406,15 @@ SELECT id FROM transfers WHERE source_device_id = ? AND client_transfer_id = ?`,
 		if !errors.Is(err, sql.ErrNoRows) {
 			return Transfer{}, nil, err
 		}
+	}
+	var draftCount int
+	if err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM transfers WHERE source_device_id = ? AND status = 'draft' AND deleted_at IS NULL`,
+		sourceDeviceID).Scan(&draftCount); err != nil {
+		return Transfer{}, nil, err
+	}
+	if draftCount >= maxDraftTransfersPerDevice {
+		return Transfer{}, nil, ErrLimitExceeded
 	}
 	transferID, err := newID()
 	if err != nil {
@@ -445,6 +506,54 @@ func (s *Store) GetBlob(ctx context.Context, digest string) (Blob, error) {
 		return Blob{}, ErrNotFound
 	}
 	return blob, err
+}
+
+func (s *Store) TotalBlobBytes(ctx context.Context) (int64, error) {
+	var total int64
+	err := s.db.QueryRowContext(ctx, `SELECT COALESCE(SUM(size), 0) FROM blobs`).Scan(&total)
+	return total, err
+}
+
+func (s *Store) CleanupExpiredPairingCodes(ctx context.Context) error {
+	_, err := s.db.ExecContext(ctx,
+		`DELETE FROM pairing_codes WHERE used_at IS NOT NULL OR julianday(expires_at) <= julianday(?)`,
+		formatTime(s.now().UTC()))
+	return err
+}
+
+func (s *Store) DeleteStaleDrafts(ctx context.Context, createdBefore time.Time) ([]string, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	rows, err := tx.QueryContext(ctx, `
+SELECT DISTINCT i.sha256 FROM items i
+JOIN transfers t ON t.id = i.transfer_id
+WHERE t.status = 'draft' AND julianday(t.created_at) < julianday(?) AND i.kind = 'file'`, formatTime(createdBefore.UTC()))
+	if err != nil {
+		return nil, err
+	}
+	digests := make([]string, 0)
+	for rows.Next() {
+		var digest string
+		if err := rows.Scan(&digest); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		digests = append(digests, digest)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM transfers WHERE status = 'draft' AND julianday(created_at) < julianday(?)`, formatTime(createdBefore.UTC())); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return digests, nil
 }
 
 func (s *Store) CommitTransfer(ctx context.Context, transferID string, deviceID string) (Transfer, error) {
@@ -585,7 +694,7 @@ func (s *Store) DeleteTransfer(ctx context.Context, transferID string) ([]string
 	for rows.Next() {
 		var digest string
 		if scanErr := rows.Scan(&digest); scanErr != nil {
-			rows.Close()
+			_ = rows.Close()
 			return nil, scanErr
 		}
 		digests = append(digests, digest)

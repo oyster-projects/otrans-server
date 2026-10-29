@@ -3,12 +3,29 @@
 set -eu
 umask 077
 
-if [ -z "${wizard_admin_token:-}" ]; then
-  echo "Admin token is required." > "$TRIM_TEMP_LOGFILE"
+wizard_admin_token=${wizard_admin_token:-}
+token_length=${#wizard_admin_token}
+case "$wizard_admin_token" in
+  *[!A-Za-z0-9_-]*|'') valid_token=false ;;
+  *) valid_token=true ;;
+esac
+if [ "$valid_token" != true ] || [ "$token_length" -lt 16 ] || [ "$token_length" -gt 128 ]; then
+  echo "Admin token must contain 16-128 letters, digits, underscores, or hyphens." > "$TRIM_TEMP_LOGFILE"
+  exit 1
+fi
+
+max_upload=${wizard_max_upload_bytes:-4294967296}
+max_storage=${wizard_max_storage_bytes:-107374182400}
+case "$max_upload:$max_storage" in
+  *[!0-9:]*|0:*|*:0) echo "Storage limits must be positive integers." > "$TRIM_TEMP_LOGFILE"; exit 1 ;;
+esac
+if [ "$max_storage" -lt "$max_upload" ]; then
+  echo "Total storage quota must be greater than or equal to the single-file limit." > "$TRIM_TEMP_LOGFILE"
   exit 1
 fi
 
 cat > "$TRIM_PKGETC/otrans.conf" <<EOF
 OTRANS_ADMIN_TOKEN=$wizard_admin_token
-OTRANS_MAX_UPLOAD_BYTES=${wizard_max_upload_bytes:-4294967296}
+OTRANS_MAX_UPLOAD_BYTES=$max_upload
+OTRANS_MAX_STORAGE_BYTES=$max_storage
 EOF

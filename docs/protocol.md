@@ -16,7 +16,7 @@ OTrans-FN 是数据权威中心。v2 允许客户端保存同一台服务器的�
 3. 手机或 Windows 调用 `POST /api/v1/pair`，获得设备令牌。
 4. 后续请求统一使用 `Authorization: Bearer <device-token>`。
 
-设备令牌只在配对成功时返回一次，服务端仅保存其 SHA-256 摘要。
+设备令牌只在配对成功时返回一次，服务端仅保存其 SHA-256 摘要。管理员可通过管理页撤销设备；撤销后该设备的 HTTP、WebSocket、待使用票据和局域网登记立即失效。
 
 ## 上传事务
 
@@ -38,7 +38,7 @@ GET /api/v1/ws?ticket=<one-time-ticket>
 
 WebSocket 只通知 `events.available` 和最新事件序号，不直接承载文件或完整事件。连接建立、断线重连、系统休眠恢复后，客户端都必须继续按持久化游标调用 HTTP 事件接口，因此通知丢失不会造成数据丢失。
 
-服务端以设备 ID 为键只保留一个 WebSocket。相同设备建立新连接时，服务端必须立即关闭此前连接，避免休眠恢复、网络切换或客户端异常退出留下重复连接。`GET /healthz` 同时返回 `activeRealtimeConnections` 与 `goroutines`，供管理页观察连接和协程是否稳定。
+服务端以设备 ID 为键只保留一个 WebSocket。相同设备建立新连接时，服务端必须立即关闭此前连接，避免休眠恢复、网络切换或客户端异常退出留下重复连接。公开的 `GET /healthz` 只返回服务状态；实时连接数、协程数和存储用量仅通过管理员接口读取。
 
 客户端调用：
 
@@ -81,6 +81,10 @@ PUT /api/v1/devices/me/cursor
 | GET | `/healthz` | 健康检查 |
 | GET | `/api/v1/server-info` | 返回持久化 `serverId` 和协议版本 |
 | POST | `/api/v1/admin/pair-codes` | 创建一次性配对码 |
+| GET | `/api/v1/admin/status` | 管理员读取连接数和存储用量 |
+| GET | `/api/v1/admin/devices` | 管理员查看已配对设备 |
+| DELETE | `/api/v1/admin/devices/{id}` | 管理员撤销设备 |
+| GET | `/api/v1/admin/transfers` | 管理员查看中转记录 |
 | POST | `/api/v1/pair` | 设备配对 |
 | GET | `/api/v1/devices/me` | 当前设备信息 |
 | PUT | `/api/v1/devices/me/cursor` | 提交同步游标 |

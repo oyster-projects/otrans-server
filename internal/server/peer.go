@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/otrans-app/otrans-fn/internal/store"
+	"github.com/oyster-projects/otrans-server/internal/store"
 )
 
 const (
@@ -151,6 +151,17 @@ func (m *peerManager) cleanupLocked(now time.Time) {
 	}
 }
 
+func (m *peerManager) revokeDevice(deviceID string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.presence, deviceID)
+	for token, ticket := range m.tickets {
+		if ticket.sourceDeviceID == deviceID || ticket.receiverDeviceID == deviceID {
+			delete(m.tickets, token)
+		}
+	}
+}
+
 func normalizePeerAddress(raw string) (string, error) {
 	parsed, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil || parsed.Scheme != "http" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
@@ -184,7 +195,7 @@ func (s *Server) handlePeerAnnounce(w http.ResponseWriter, r *http.Request) {
 		Addresses []string `json:"addresses"`
 		Digests   []string `json:"digests"`
 	}
-	if err := decodeJSON(r, &input); err != nil {
+	if err := decodeJSON(w, r, &input); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -216,7 +227,7 @@ func (s *Server) handlePeerTicketRedeem(w http.ResponseWriter, r *http.Request) 
 		Ticket string `json:"ticket"`
 		Digest string `json:"digest"`
 	}
-	if err := decodeJSON(r, &input); err != nil {
+	if err := decodeJSON(w, r, &input); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}

@@ -19,32 +19,41 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
-	"github.com/otrans-app/otrans-fn/internal/store"
+	"github.com/oyster-projects/otrans-server/internal/store"
 )
 
 var digestPattern = regexp.MustCompile(`^[a-f0-9]{64}$`)
 var clientTransferIDPattern = regexp.MustCompile(`^[A-Za-z0-9._:-]{1,128}$`)
+var errStorageQuotaExceeded = errors.New("storage quota exceeded")
+
+const defaultMaxStorageBytes int64 = 100 * 1024 * 1024 * 1024
 
 //go:embed web/*
 var webAssets embed.FS
 
 type Config struct {
-	AdminToken     string
-	BlobDir        string
-	MaxUploadBytes int64
+	AdminToken      string
+	BlobDir         string
+	MaxUploadBytes  int64
+	MaxStorageBytes int64
 }
 
 type Server struct {
-	config   Config
-	store    *store.Store
-	log      *slog.Logger
-	mux      *http.ServeMux
-	serverID string
-	tickets  *ticketManager
-	hub      *eventHub
-	peers    *peerManager
+	config          Config
+	store           *store.Store
+	log             *slog.Logger
+	mux             *http.ServeMux
+	serverID        string
+	tickets         *ticketManager
+	hub             *eventHub
+	peers           *peerManager
+	limiter         *rateLimiter
+	blobRoot        *os.Root
+	storageMu       sync.Mutex
+	reservedStorage int64
 }
 
 type contextKey string
@@ -67,7 +76,17 @@ func New(config Config, dataStore *store.Store, logger *slog.Logger) (*Server, e
 	if config.MaxUploadBytes <= 0 {
 		return nil, errors.New("max upload bytes must be positive")
 	}
+	if config.MaxStorageBytes <= 0 {
+		config.MaxStorageBytes = defaultMaxStorageBytes
+	}
+	if config.MaxStorageBytes < config.MaxUploadBytes {
+		return nil, errors.New("max storage bytes must be greater than or equal to max upload bytes")
+	}
 	if err := os.MkdirAll(config.BlobDir, 0o750); err != nil {
+		return nil, err
+	}
+	blobRoot, err := os.OpenRoot(config.BlobDir)
+	if err != nil {
 		return nil, err
 	}
 	if logger == nil {
@@ -75,18 +94,24 @@ func New(config Config, dataStore *store.Store, logger *slog.Logger) (*Server, e
 	}
 	serverID, err := dataStore.ServerID(context.Background())
 	if err != nil {
+		_ = blobRoot.Close()
 		return nil, fmt.Errorf("load server identity: %w", err)
 	}
 	server := &Server{
 		config: config, store: dataStore, log: logger, mux: http.NewServeMux(),
 		serverID: serverID, tickets: newTicketManager(), hub: newEventHub(), peers: newPeerManager(),
+		limiter: newRateLimiter(), blobRoot: blobRoot,
 	}
 	server.routes()
 	return server, nil
 }
 
+func (s *Server) Close() error {
+	return s.blobRoot.Close()
+}
+
 func (s *Server) Handler() http.Handler {
-	return s.recoverPanic(s.logRequests(s.mux))
+	return s.recoverPanic(s.logRequests(securityHeaders(s.mux)))
 }
 
 func (s *Server) routes() {
@@ -100,6 +125,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/v1/server-info", s.handleServerInfo)
 	s.mux.HandleFunc("POST /api/v1/admin/pair-codes", s.handleCreatePairCode)
 	s.mux.HandleFunc("GET /api/v1/admin/transfers", s.handleAdminTransfers)
+	s.mux.HandleFunc("GET /api/v1/admin/status", s.handleAdminStatus)
+	s.mux.HandleFunc("GET /api/v1/admin/devices", s.handleAdminDevices)
+	s.mux.HandleFunc("DELETE /api/v1/admin/devices/{id}", s.handleAdminRevokeDevice)
 	s.mux.HandleFunc("POST /api/v1/pair", s.handlePair)
 	s.mux.Handle("GET /api/v1/devices/me", s.requireDevice(http.HandlerFunc(s.handleDeviceMe)))
 	s.mux.Handle("PUT /api/v1/devices/me/cursor", s.requireDevice(http.HandlerFunc(s.handleUpdateCursor)))
@@ -179,9 +207,7 @@ func (s *Server) serveWebFile(w http.ResponseWriter, name string, contentType st
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{
-		"status": "ok", "activeRealtimeConnections": s.hub.count(), "goroutines": runtime.NumGoroutine(),
-	})
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
 func (s *Server) handleServerInfo(w http.ResponseWriter, _ *http.Request) {
@@ -191,6 +217,9 @@ func (s *Server) handleServerInfo(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *Server) handleCreatePairCode(w http.ResponseWriter, r *http.Request) {
+	if !s.enforceRateLimit(w, r, "admin", 20, time.Minute) {
+		return
+	}
 	if !s.isAdmin(r) {
 		writeError(w, http.StatusUnauthorized, "invalid admin token")
 		return
@@ -204,6 +233,9 @@ func (s *Server) handleCreatePairCode(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAdminTransfers(w http.ResponseWriter, r *http.Request) {
+	if !s.enforceRateLimit(w, r, "admin", 60, time.Minute) {
+		return
+	}
 	if !s.isAdmin(r) {
 		writeError(w, http.StatusUnauthorized, "invalid admin token")
 		return
@@ -227,13 +259,77 @@ func (s *Server) handleAdminTransfers(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"transfers": result})
 }
 
+func (s *Server) handleAdminStatus(w http.ResponseWriter, r *http.Request) {
+	if !s.enforceRateLimit(w, r, "admin", 60, time.Minute) {
+		return
+	}
+	if !s.isAdmin(r) {
+		writeError(w, http.StatusUnauthorized, "invalid admin token")
+		return
+	}
+	used, err := s.store.TotalBlobBytes(r.Context())
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"activeRealtimeConnections": s.hub.count(), "goroutines": runtime.NumGoroutine(),
+		"storageBytes": used, "maxStorageBytes": s.config.MaxStorageBytes,
+	})
+}
+
+func (s *Server) handleAdminDevices(w http.ResponseWriter, r *http.Request) {
+	if !s.enforceRateLimit(w, r, "admin", 60, time.Minute) {
+		return
+	}
+	if !s.isAdmin(r) {
+		writeError(w, http.StatusUnauthorized, "invalid admin token")
+		return
+	}
+	devices, err := s.store.ListDevices(r.Context(), true)
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"devices": devices})
+}
+
+func (s *Server) handleAdminRevokeDevice(w http.ResponseWriter, r *http.Request) {
+	if !s.enforceRateLimit(w, r, "admin", 30, time.Minute) {
+		return
+	}
+	if !s.isAdmin(r) {
+		writeError(w, http.StatusUnauthorized, "invalid admin token")
+		return
+	}
+	deviceID := strings.TrimSpace(r.PathValue("id"))
+	if deviceID == "" {
+		writeError(w, http.StatusBadRequest, "device id is required")
+		return
+	}
+	if err := s.store.RevokeDevice(r.Context(), deviceID); errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, "device not found")
+		return
+	} else if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	s.tickets.revokeDevice(deviceID)
+	s.hub.disconnect(deviceID)
+	s.peers.revokeDevice(deviceID)
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (s *Server) handlePair(w http.ResponseWriter, r *http.Request) {
+	if !s.enforceRateLimit(w, r, "pair", 20, time.Minute) {
+		return
+	}
 	var input struct {
 		Code     string `json:"code"`
 		Name     string `json:"name"`
 		Platform string `json:"platform"`
 	}
-	if err := decodeJSON(r, &input); err != nil {
+	if err := decodeJSON(w, r, &input); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -267,7 +363,7 @@ func (s *Server) handleUpdateCursor(w http.ResponseWriter, r *http.Request) {
 	var input struct {
 		Cursor int64 `json:"cursor"`
 	}
-	if err := decodeJSON(r, &input); err != nil || input.Cursor < 0 {
+	if err := decodeJSON(w, r, &input); err != nil || input.Cursor < 0 {
 		writeError(w, http.StatusBadRequest, "cursor must be a non-negative integer")
 		return
 	}
@@ -281,7 +377,7 @@ func (s *Server) handleUpdateCursor(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleCreateTransfer(w http.ResponseWriter, r *http.Request) {
 	var input store.CreateTransfer
-	if err := decodeJSON(r, &input); err != nil {
+	if err := decodeJSON(w, r, &input); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -291,6 +387,10 @@ func (s *Server) handleCreateTransfer(w http.ResponseWriter, r *http.Request) {
 	}
 	device := deviceFromContext(r.Context())
 	transfer, missing, err := s.store.CreateTransfer(r.Context(), device.ID, input)
+	if errors.Is(err, store.ErrLimitExceeded) {
+		writeError(w, http.StatusTooManyRequests, err.Error())
+		return
+	}
 	if err != nil {
 		s.internalError(w, r, err)
 		return
@@ -398,6 +498,17 @@ func (s *Server) handlePutBlob(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, r, getErr)
 		return
 	}
+	releaseStorage, err := s.reserveStorage(r.Context(), expectedSize)
+	if errors.Is(err, errStorageQuotaExceeded) {
+		writeError(w, http.StatusInsufficientStorage, "server storage quota exceeded")
+		return
+	}
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	defer releaseStorage()
+	setReadDeadline(w, transferDeadline(expectedSize))
 
 	temp, err := os.CreateTemp(s.config.BlobDir, "upload-*")
 	if err != nil {
@@ -405,7 +516,8 @@ func (s *Server) handlePutBlob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	tempPath := temp.Name()
-	defer os.Remove(tempPath)
+	tempName := filepath.Base(tempPath)
+	defer func() { _ = s.blobRoot.Remove(tempName) }()
 	hasher := sha256.New()
 	written, copyErr := io.Copy(io.MultiWriter(temp, hasher), io.LimitReader(r.Body, s.config.MaxUploadBytes+1))
 	closeErr := temp.Close()
@@ -427,20 +539,23 @@ func (s *Server) handlePutBlob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	relativePath := filepath.Join(digest[0:2], digest[2:4], digest)
-	finalPath := filepath.Join(s.config.BlobDir, relativePath)
-	if err := os.MkdirAll(filepath.Dir(finalPath), 0o750); err != nil {
+	relativePath, err := contentAddressPath(digest)
+	if err != nil {
 		s.internalError(w, r, err)
 		return
 	}
-	if err := os.Rename(tempPath, finalPath); err != nil {
+	if err := s.blobRoot.MkdirAll(filepath.Dir(relativePath), 0o750); err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	if err := s.blobRoot.Rename(tempName, relativePath); err != nil {
 		s.internalError(w, r, err)
 		return
 	}
 	if err := s.store.PutBlob(r.Context(), store.Blob{
 		SHA256: digest, Size: written, Path: relativePath, CreatedAt: time.Now().UTC().Format(time.RFC3339Nano),
 	}); err != nil {
-		_ = os.Remove(finalPath)
+		_ = s.blobRoot.Remove(relativePath)
 		s.internalError(w, r, err)
 		return
 	}
@@ -462,7 +577,7 @@ func (s *Server) handleGetBlob(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, r, err)
 		return
 	}
-	file, err := os.Open(filepath.Join(s.config.BlobDir, blob.Path))
+	file, err := s.blobRoot.Open(blob.Path)
 	if errors.Is(err, os.ErrNotExist) {
 		writeError(w, http.StatusNotFound, "blob file not found")
 		return
@@ -472,11 +587,17 @@ func (s *Server) handleGetBlob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer file.Close()
-	contentType := mime.TypeByExtension(filepath.Ext(r.URL.Query().Get("name")))
+	setWriteDeadline(w, transferDeadline(blob.Size))
+	downloadName := filepath.Base(strings.TrimSpace(r.URL.Query().Get("name")))
+	if !safeFileName(downloadName) {
+		downloadName = "download"
+	}
+	contentType := mime.TypeByExtension(filepath.Ext(downloadName))
 	if contentType == "" {
 		contentType = "application/octet-stream"
 	}
 	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": downloadName}))
 	w.Header().Set("ETag", `"`+digest+`"`)
 	http.ServeContent(w, r, digest, time.Time{}, file)
 }
@@ -497,6 +618,9 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) requireDevice(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !s.enforceRateLimit(w, r, "device-auth", 1200, time.Minute) {
+			return
+		}
 		header := strings.TrimSpace(r.Header.Get("Authorization"))
 		if !strings.HasPrefix(header, "Bearer ") {
 			writeError(w, http.StatusUnauthorized, "missing bearer token")
@@ -504,11 +628,21 @@ func (s *Server) requireDevice(next http.Handler) http.Handler {
 		}
 		device, err := s.store.Authenticate(r.Context(), strings.TrimSpace(strings.TrimPrefix(header, "Bearer ")))
 		if errors.Is(err, store.ErrNotFound) {
+			if !s.enforceRateLimit(w, r, "invalid-device-auth", 60, time.Minute) {
+				return
+			}
 			writeError(w, http.StatusUnauthorized, "invalid device token")
 			return
 		}
 		if err != nil {
 			s.internalError(w, r, err)
+			return
+		}
+		allowed, retryAfter := s.limiter.allow("device|"+device.ID, 600, time.Minute)
+		if !allowed {
+			seconds := int(retryAfter.Seconds()) + 1
+			w.Header().Set("Retry-After", strconv.Itoa(seconds))
+			writeError(w, http.StatusTooManyRequests, "device request rate exceeded")
 			return
 		}
 		ctx := context.WithValue(r.Context(), deviceContextKey, device)
@@ -517,7 +651,11 @@ func (s *Server) requireDevice(next http.Handler) http.Handler {
 }
 
 func (s *Server) isAdmin(r *http.Request) bool {
-	return constantTimeEqual(r.Header.Get("X-OTrans-Admin-Token"), s.config.AdminToken)
+	valid := constantTimeEqual(r.Header.Get("X-OTrans-Admin-Token"), s.config.AdminToken)
+	if !valid {
+		s.log.Warn("admin authentication failed", "remote", clientAddress(r), "path", r.URL.Path)
+	}
+	return valid
 }
 
 func (s *Server) removeBlobIfUnused(ctx context.Context, digest string) error {
@@ -532,10 +670,28 @@ func (s *Server) removeBlobIfUnused(ctx context.Context, digest string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.Remove(filepath.Join(s.config.BlobDir, blob.Path)); err != nil && !errors.Is(err, os.ErrNotExist) {
+	if err := s.blobRoot.Remove(blob.Path); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
 	return s.store.DeleteBlobRecord(ctx, digest)
+}
+
+func (s *Server) reserveStorage(ctx context.Context, size int64) (func(), error) {
+	s.storageMu.Lock()
+	defer s.storageMu.Unlock()
+	used, err := s.store.TotalBlobBytes(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if size > s.config.MaxStorageBytes-used-s.reservedStorage {
+		return nil, errStorageQuotaExceeded
+	}
+	s.reservedStorage += size
+	return func() {
+		s.storageMu.Lock()
+		s.reservedStorage -= size
+		s.storageMu.Unlock()
+	}, nil
 }
 
 func (s *Server) internalError(w http.ResponseWriter, r *http.Request, err error) {
@@ -547,7 +703,7 @@ func (s *Server) logRequests(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		started := time.Now()
 		next.ServeHTTP(w, r)
-		s.log.Info("request", "method", r.Method, "path", r.URL.Path, "duration", time.Since(started))
+		s.log.Info("request", "method", r.Method, "path", r.URL.Path, "remote", clientAddress(r), "duration", time.Since(started))
 	})
 }
 
@@ -626,8 +782,17 @@ func safeFileName(name string) bool {
 	return !isReserved
 }
 
-func decodeJSON(r *http.Request, target any) error {
-	decoder := json.NewDecoder(io.LimitReader(r.Body, 2*1024*1024))
+func contentAddressPath(digest string) (string, error) {
+	if !digestPattern.MatchString(digest) {
+		return "", errors.New("invalid blob digest")
+	}
+	return filepath.Join(digest[0:2], digest[2:4], digest), nil
+}
+
+func decodeJSON(w http.ResponseWriter, r *http.Request, target any) error {
+	setReadDeadline(w, 20*time.Second)
+	r.Body = http.MaxBytesReader(w, r.Body, 2*1024*1024)
+	decoder := json.NewDecoder(r.Body)
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(target); err != nil {
 		return fmt.Errorf("invalid JSON body: %w", err)
@@ -661,6 +826,8 @@ func writeError(w http.ResponseWriter, status int, message string) {
 
 func writeJSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(value)
 }

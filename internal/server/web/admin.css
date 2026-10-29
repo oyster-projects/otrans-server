@@ -125,6 +125,9 @@ button:disabled { cursor: wait; opacity: .65; }
 .record-item { margin-top: 12px; padding-top: 12px; border-top: 1px solid #e7eaf2; }
 .record-text { margin: 0; max-height: 180px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: 14px/1.6 ui-monospace, monospace; }
 .record-file { display: flex; justify-content: space-between; gap: 12px; color: #3f4962; font-size: 13px; }
+.device-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.revoke-device, .device-revoked { min-height: 36px; padding: 0 12px; color: #a43f3f; background: #ffe8e8; }
+.device-revoked { color: #747d91; background: #eceef4; cursor: default; }
 .explain { margin: 24px 8px 0; line-height: 1.7; font-size: 14px; }
 .explain h2 { margin: 0 0 5px; color: #293149; font-size: 16px; }
 .explain p { margin: 0; }

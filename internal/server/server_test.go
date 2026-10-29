@@ -15,8 +15,8 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/otrans-app/otrans-fn/internal/server"
-	"github.com/otrans-app/otrans-fn/internal/store"
+	"github.com/oyster-projects/otrans-server/internal/server"
+	"github.com/oyster-projects/otrans-server/internal/store"
 )
 
 const testAdminToken = "test-admin-token-long-enough"
@@ -43,7 +43,10 @@ func TestTransferLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	httpServer := httptest.NewServer(api.Handler())
-	t.Cleanup(httpServer.Close)
+	t.Cleanup(func() {
+		httpServer.Close()
+		_ = api.Close()
+	})
 	client := &testClient{t: t, base: httpServer.URL}
 
 	pairCodeResponse := client.request(http.MethodPost, "/api/v1/admin/pair-codes", nil, map[string]string{
@@ -171,7 +174,10 @@ func TestWebSocketSignalsAvailableEvents(t *testing.T) {
 		t.Fatal(err)
 	}
 	httpServer := httptest.NewServer(api.Handler())
-	t.Cleanup(httpServer.Close)
+	t.Cleanup(func() {
+		httpServer.Close()
+		_ = api.Close()
+	})
 	client := pairTestDevice(t, httpServer.URL, "Realtime PC", "windows")
 
 	ticketResponse := client.request(http.MethodPost, "/api/v1/ws-ticket", nil, nil)
@@ -233,7 +239,10 @@ func TestWebSocketReplacesPreviousConnectionForSameDevice(t *testing.T) {
 		t.Fatal(err)
 	}
 	httpServer := httptest.NewServer(api.Handler())
-	t.Cleanup(httpServer.Close)
+	t.Cleanup(func() {
+		httpServer.Close()
+		_ = api.Close()
+	})
 	client := pairTestDevice(t, httpServer.URL, "Single Realtime PC", "windows")
 
 	dial := func() *websocket.Conn {
@@ -268,7 +277,9 @@ func TestWebSocketReplacesPreviousConnectionForSameDevice(t *testing.T) {
 		t.Fatal("previous realtime connection remained open after replacement")
 	}
 
-	healthResponse := client.request(http.MethodGet, "/healthz", nil, nil)
+	healthResponse := client.request(http.MethodGet, "/api/v1/admin/status", nil, map[string]string{
+		"X-OTrans-Admin-Token": testAdminToken,
+	})
 	assertStatus(t, healthResponse, http.StatusOK)
 	var health struct {
 		ActiveRealtimeConnections int `json:"activeRealtimeConnections"`
@@ -280,6 +291,13 @@ func TestWebSocketReplacesPreviousConnectionForSameDevice(t *testing.T) {
 	}
 	if health.Goroutines < 1 {
 		t.Fatalf("expected positive goroutine count, got %d", health.Goroutines)
+	}
+	publicHealth := client.request(http.MethodGet, "/healthz", nil, nil)
+	assertStatus(t, publicHealth, http.StatusOK)
+	publicBody, err := io.ReadAll(publicHealth.Body)
+	publicHealth.Body.Close()
+	if err != nil || bytes.Contains(publicBody, []byte("goroutines")) {
+		t.Fatalf("public health endpoint leaked internal metrics: %s", publicBody)
 	}
 }
 
@@ -297,6 +315,7 @@ func TestAdminPage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = api.Close() })
 
 	rootRequest := httptest.NewRequest(http.MethodGet, "/", nil)
 	rootResponse := httptest.NewRecorder()
@@ -316,6 +335,17 @@ func TestAdminPage(t *testing.T) {
 	}
 	if pageResponse.Header().Get("Cache-Control") != "no-store" {
 		t.Fatal("admin page must not be cached")
+	}
+	if pageResponse.Header().Get("Cross-Origin-Resource-Policy") != "same-site" {
+		t.Fatal("admin page must be restricted to same-site embedding")
+	}
+	crossSiteFrameRequest := httptest.NewRequest(http.MethodGet, "/admin/", nil)
+	crossSiteFrameRequest.Header.Set("Sec-Fetch-Dest", "iframe")
+	crossSiteFrameRequest.Header.Set("Sec-Fetch-Site", "cross-site")
+	crossSiteFrameResponse := httptest.NewRecorder()
+	api.Handler().ServeHTTP(crossSiteFrameResponse, crossSiteFrameRequest)
+	if crossSiteFrameResponse.Code != http.StatusForbidden {
+		t.Fatalf("cross-site admin frame returned %d", crossSiteFrameResponse.Code)
 	}
 
 	assetRequest := httptest.NewRequest(http.MethodGet, "/admin/admin.js", nil)
@@ -372,7 +402,10 @@ func TestWebPlatformCanPair(t *testing.T) {
 		t.Fatal(err)
 	}
 	httpServer := httptest.NewServer(api.Handler())
-	t.Cleanup(httpServer.Close)
+	t.Cleanup(func() {
+		httpServer.Close()
+		_ = api.Close()
+	})
 	client := pairTestDevice(t, httpServer.URL, "Browser", "web")
 	response := client.request(http.MethodGet, "/api/v1/devices/me", nil, nil)
 	assertStatus(t, response, http.StatusOK)
@@ -398,7 +431,10 @@ func TestLANPeerDiscoveryAndTicketRedemption(t *testing.T) {
 		t.Fatal(err)
 	}
 	httpServer := httptest.NewServer(api.Handler())
-	t.Cleanup(httpServer.Close)
+	t.Cleanup(func() {
+		httpServer.Close()
+		_ = api.Close()
+	})
 	source := pairTestDevice(t, httpServer.URL, "Seeder PC", "windows")
 	receiver := pairTestDevice(t, httpServer.URL, "Receiver PC", "windows")
 	digestBytes := sha256.Sum256([]byte("peer content"))
@@ -459,7 +495,10 @@ func TestRejectsWrongBlobDigest(t *testing.T) {
 		t.Fatal(err)
 	}
 	httpServer := httptest.NewServer(api.Handler())
-	t.Cleanup(httpServer.Close)
+	t.Cleanup(func() {
+		httpServer.Close()
+		_ = api.Close()
+	})
 	client := pairTestDevice(t, httpServer.URL, "Harmony phone", "harmonyos")
 
 	declared := sha256.Sum256([]byte("declared"))
@@ -473,6 +512,91 @@ func TestRejectsWrongBlobDigest(t *testing.T) {
 	putResponse := client.request(http.MethodPut, "/api/v1/blobs/"+digest, bytes.NewReader([]byte("actual")), nil)
 	assertStatus(t, putResponse, http.StatusBadRequest)
 	putResponse.Body.Close()
+}
+
+func TestAdminCanRevokeDevice(t *testing.T) {
+	t.Parallel()
+	tempDir := t.TempDir()
+	dataStore, err := store.Open(filepath.Join(tempDir, "otrans.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = dataStore.Close() })
+	api, err := server.New(server.Config{
+		AdminToken: testAdminToken, BlobDir: filepath.Join(tempDir, "blobs"), MaxUploadBytes: 1024,
+	}, dataStore, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpServer := httptest.NewServer(api.Handler())
+	t.Cleanup(func() {
+		httpServer.Close()
+		_ = api.Close()
+	})
+	client := pairTestDevice(t, httpServer.URL, "Lost phone", "harmonyos")
+
+	devicesResponse := client.request(http.MethodGet, "/api/v1/admin/devices", nil, map[string]string{
+		"X-OTrans-Admin-Token": testAdminToken,
+	})
+	assertStatus(t, devicesResponse, http.StatusOK)
+	var devicesPayload struct {
+		Devices []store.Device `json:"devices"`
+	}
+	decodeResponse(t, devicesResponse, &devicesPayload)
+	if len(devicesPayload.Devices) != 1 {
+		t.Fatalf("unexpected devices: %#v", devicesPayload.Devices)
+	}
+
+	revokeResponse := client.request(http.MethodDelete, "/api/v1/admin/devices/"+devicesPayload.Devices[0].ID, nil,
+		map[string]string{"X-OTrans-Admin-Token": testAdminToken})
+	assertStatus(t, revokeResponse, http.StatusNoContent)
+	revokeResponse.Body.Close()
+
+	meResponse := client.request(http.MethodGet, "/api/v1/devices/me", nil, nil)
+	assertStatus(t, meResponse, http.StatusUnauthorized)
+	meResponse.Body.Close()
+}
+
+func TestStorageQuotaRejectsAdditionalBlob(t *testing.T) {
+	t.Parallel()
+	tempDir := t.TempDir()
+	dataStore, err := store.Open(filepath.Join(tempDir, "otrans.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = dataStore.Close() })
+	api, err := server.New(server.Config{
+		AdminToken: testAdminToken, BlobDir: filepath.Join(tempDir, "blobs"),
+		MaxUploadBytes: 4, MaxStorageBytes: 6,
+	}, dataStore, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpServer := httptest.NewServer(api.Handler())
+	t.Cleanup(func() {
+		httpServer.Close()
+		_ = api.Close()
+	})
+	client := pairTestDevice(t, httpServer.URL, "Quota PC", "windows")
+
+	upload := func(id string, content []byte, expectedStatus int) string {
+		t.Helper()
+		sum := sha256.Sum256(content)
+		digest := hex.EncodeToString(sum[:])
+		create := client.requestJSON(http.MethodPost, "/api/v1/transfers", store.CreateTransfer{
+			ClientTransferID: id,
+			Items:            []store.CreateItem{{Kind: "file", Name: id + ".bin", Size: int64(len(content)), SHA256: digest}},
+		})
+		assertStatus(t, create, http.StatusCreated)
+		create.Body.Close()
+		put := client.request(http.MethodPut, "/api/v1/blobs/"+digest, bytes.NewReader(content), nil)
+		assertStatus(t, put, expectedStatus)
+		put.Body.Close()
+		return digest
+	}
+
+	upload("first", []byte("1234"), http.StatusCreated)
+	upload("second", []byte("5678"), http.StatusInsufficientStorage)
 }
 
 func pairTestDevice(t *testing.T, base string, name string, platform string) *testClient {

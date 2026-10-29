@@ -57,6 +57,16 @@ func (m *ticketManager) redeem(token string) (webSocketTicket, bool) {
 	return ticket, true
 }
 
+func (m *ticketManager) revokeDevice(deviceID string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for token, ticket := range m.tickets {
+		if ticket.deviceID == deviceID {
+			delete(m.tickets, token)
+		}
+	}
+}
+
 type webSocketClient struct {
 	deviceID   string
 	updates    chan int64
@@ -114,6 +124,18 @@ func (h *eventHub) count() int {
 	return len(h.clients)
 }
 
+func (h *eventHub) disconnect(deviceID string) {
+	h.mu.Lock()
+	client := h.clients[deviceID]
+	if client != nil {
+		delete(h.clients, deviceID)
+	}
+	h.mu.Unlock()
+	if client != nil {
+		client.close()
+	}
+}
+
 func (h *eventHub) broadcast(sequence int64) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -146,6 +168,9 @@ func (s *Server) handleCreateWebSocketTicket(w http.ResponseWriter, r *http.Requ
 }
 
 func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
+	if !s.enforceRateLimit(w, r, "websocket", 120, time.Minute) {
+		return
+	}
 	ticket, ok := s.tickets.redeem(r.URL.Query().Get("ticket"))
 	if !ok {
 		writeError(w, http.StatusUnauthorized, "invalid or expired WebSocket ticket")

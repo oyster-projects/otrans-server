@@ -33,6 +33,23 @@
             "message": "请输入正整数"
           }
         ]
+      },
+      {
+        "type": "text",
+        "field": "wizard_max_storage_bytes",
+        "label": "中转文件总配额（字节）",
+        "desc": "达到配额后停止接收新文件，默认 100 GiB。",
+        "initValue": "107374182400",
+        "rules": [
+          {
+            "required": true,
+            "message": "请输入总存储配额"
+          },
+          {
+            "pattern": "^[1-9][0-9]{0,14}$",
+            "message": "请输入正整数"
+          }
+        ]
       }
     ]
   }

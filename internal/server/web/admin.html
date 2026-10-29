@@ -50,9 +50,18 @@
       </div>
     </section>
 
+    <section class="card devices-card">
+      <div class="records-heading">
+        <div class="step records-step"><span>3</span><div><strong>已配对设备</strong><small>丢失或不再使用的设备应立即撤销</small></div></div>
+        <button id="refresh-devices" class="secondary refresh" type="button">刷新设备</button>
+      </div>
+      <p id="devices-status" class="records-status">输入上方管理员令牌后点击“刷新设备”。</p>
+      <div id="devices-list" class="records-list"></div>
+    </section>
+
     <section class="card transfers-card">
       <div class="records-heading">
-        <div class="step records-step"><span>3</span><div><strong>中转记录</strong><small>查看飞牛中已提交的内容</small></div></div>
+        <div class="step records-step"><span>4</span><div><strong>中转记录</strong><small>查看飞牛中已提交的内容</small></div></div>
         <button id="refresh-transfers" class="secondary refresh" type="button">刷新记录</button>
       </div>
       <p id="records-status" class="records-status">输入上方管理员令牌后点击“刷新记录”。</p>
@@ -61,7 +70,7 @@
 
     <section class="explain">
       <h2>配对后会发生什么？</h2>
-      <p>配对码在 10 分钟后过期，并且只能使用一次。配对成功后，设备会获得独立的长期令牌，日常上传无需再输入管理员令牌。</p>
+      <p>配对码在 10 分钟后过期，并且只能使用一次。配对成功后，设备会获得独立令牌；设备丢失或不再使用时，请在上方立即撤销。</p>
     </section>
   </main>
   <script src="/admin/admin.js" defer></script>
