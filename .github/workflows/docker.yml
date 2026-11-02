@@ -15,6 +15,34 @@ jobs:
       - uses: actions/checkout@v4
       - uses: docker/setup-qemu-action@v4
       - uses: docker/setup-buildx-action@v4
+      - name: Build runnable amd64 test image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          tags: otrans-server:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Start container and verify health endpoint
+        shell: bash
+        run: |
+          docker run -d --name otrans-test \
+            --read-only --tmpfs /tmp:size=16m,mode=1777 \
+            --cap-drop ALL --security-opt no-new-privileges \
+            -e OTRANS_ADMIN_TOKEN=ci-only-admin-token-123456 \
+            -p 127.0.0.1:18080:8080 otrans-server:test
+          for attempt in {1..20}; do
+            if curl --fail --silent http://127.0.0.1:18080/healthz | grep --quiet '"status":"ok"'; then
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs otrans-test
+          exit 1
+      - name: Stop test container
+        if: always()
+        run: docker rm --force otrans-test || true
       - name: Build amd64 and arm64 images
         uses: docker/build-push-action@v7
         with:
