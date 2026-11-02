@@ -1,2 +1,11 @@
 #!/bin/bash
-exit 0
+
+set -eu
+umask 077
+
+CONFIG_FILE="$TRIM_PKGETC/otrans.conf"
+if [ -f "$CONFIG_FILE" ] && ! grep -q '^OTRANS_RETENTION_DAYS=' "$CONFIG_FILE"; then
+  # Preserve existing data on upgrade. The user can explicitly choose a
+  # retention period from the fnOS application settings after upgrading.
+  printf '\nOTRANS_RETENTION_DAYS=0\n' >> "$CONFIG_FILE"
+fi

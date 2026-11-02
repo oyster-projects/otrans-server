@@ -36,6 +36,8 @@ go run ./cmd/otransd
 
 可通过 `OTRANS_MAX_UPLOAD_BYTES` 设置单文件上限，通过 `OTRANS_MAX_STORAGE_BYTES` 设置 Blob 总配额；后者必须不小于前者。`OTRANS_RETENTION_DAYS` 设置已提交内容的保留天数，默认 `30`，设为 `0` 可关闭自动删除。
 
+为避免升级时意外清理历史内容，从 `v0.5.2` 或更早版本升级的飞牛安装会先保持自动删除关闭；升级后请进入 OTrans 应用设置明确选择保留天数。全新安装默认 30 天。
+
 启动后可访问：
 
 - 管理页：`http://飞牛地址:端口/admin/`

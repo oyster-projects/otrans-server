@@ -11,4 +11,4 @@ ctl_stop=true
 service_port=@@SERVICE_PORT@@
 checkport=true
 disable_authorization_path=true
-changelog=增加可配置的中转内容自动删除周期，并提供安全加固的 Docker 部署版本。
+changelog=增加可配置的中转内容自动删除周期（旧版升级默认关闭以保护历史数据），并提供安全加固的 Docker 部署版本。
