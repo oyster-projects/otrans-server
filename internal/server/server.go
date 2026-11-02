@@ -39,6 +39,7 @@ type Config struct {
 	BlobDir         string
 	MaxUploadBytes  int64
 	MaxStorageBytes int64
+	Retention       time.Duration
 }
 
 type Server struct {
@@ -81,6 +82,9 @@ func New(config Config, dataStore *store.Store, logger *slog.Logger) (*Server, e
 	}
 	if config.MaxStorageBytes < config.MaxUploadBytes {
 		return nil, errors.New("max storage bytes must be greater than or equal to max upload bytes")
+	}
+	if config.Retention < 0 {
+		return nil, errors.New("retention must not be negative")
 	}
 	if err := os.MkdirAll(config.BlobDir, 0o750); err != nil {
 		return nil, err
@@ -275,6 +279,7 @@ func (s *Server) handleAdminStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"activeRealtimeConnections": s.hub.count(), "goroutines": runtime.NumGoroutine(),
 		"storageBytes": used, "maxStorageBytes": s.config.MaxStorageBytes,
+		"retentionDays": int64(s.config.Retention / (24 * time.Hour)),
 	})
 }
 

@@ -19,6 +19,7 @@ OTrans 的飞牛 fnOS 中心服务。它保存中转记录和文件实体，并�
 - 同端口网页版，支持配对、文本与文件传送、下载校验及全局删除
 - v0.5 实验性局域网文件源发现与 30 秒一次性票据；接收端直连失败时继续从飞牛下载
 - 管理、配对和设备 API 分级限流，默认 100 GiB 文件总配额，48 小时自动清理未完成草稿
+- 已提交内容默认保留 30 天后全端同步删除，可配置或关闭
 
 ## 本地启动
 
@@ -33,7 +34,7 @@ go run ./cmd/otransd
 
 > **不要把 OTrans 的原始 HTTP 端口直接映射到公网。** 外网使用必须通过 HTTPS 反向代理或可信 VPN，并正确转发 WebSocket。管理员令牌、设备令牌和中转内容都依赖传输层加密保护。
 
-可通过 `OTRANS_MAX_UPLOAD_BYTES` 设置单文件上限，通过 `OTRANS_MAX_STORAGE_BYTES` 设置 Blob 总配额；后者必须不小于前者。
+可通过 `OTRANS_MAX_UPLOAD_BYTES` 设置单文件上限，通过 `OTRANS_MAX_STORAGE_BYTES` 设置 Blob 总配额；后者必须不小于前者。`OTRANS_RETENTION_DAYS` 设置已提交内容的保留天数，默认 `30`，设为 `0` 可关闭自动删除。
 
 启动后可访问：
 
@@ -73,6 +74,18 @@ FPK 是 fnOS 应用中心识别和安装的应用包，不限定内部实现。�
 ```
 
 FPK 的默认服务端口已改为 `18990`，也可用 `-ServicePort` 指定 1024-65535 之间的其他端口。由于 FPK 内含架构二进制，x86 和 ARM 需要分别出包。
+
+## Docker 部署
+
+Docker 版本支持 `linux/amd64` 和 `linux/arm64`，默认仍只使用一个 `8080` 端口。建议通过 HTTPS 反向代理对外提供服务，不要直接把该 HTTP 端口映射到公网。
+
+```powershell
+Copy-Item .env.example .env
+# 编辑 .env，设置至少 16 位的 OTRANS_ADMIN_TOKEN
+docker compose up -d --build
+```
+
+完整说明见 [docs/docker-deployment.md](docs/docker-deployment.md)。
 
 ## 许可证
 

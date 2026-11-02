@@ -36,7 +36,7 @@ func main() {
 
 	api, err := server.New(server.Config{
 		AdminToken: config.AdminToken, BlobDir: config.BlobDir, MaxUploadBytes: config.MaxUploadBytes,
-		MaxStorageBytes: config.MaxStorageBytes,
+		MaxStorageBytes: config.MaxStorageBytes, Retention: time.Duration(config.RetentionDays) * 24 * time.Hour,
 	}, dataStore, logger)
 	if err != nil {
 		logger.Error("cannot initialize server", "error", err)
@@ -67,7 +67,8 @@ func main() {
 		}
 	}()
 
-	logger.Info("OTrans server started", "address", config.ListenAddr, "dataDir", config.DataDir)
+	logger.Info("OTrans server started", "address", config.ListenAddr, "dataDir", config.DataDir,
+		"retentionDays", config.RetentionDays)
 	if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		logger.Error("server stopped unexpectedly", "error", err)
 		os.Exit(1)

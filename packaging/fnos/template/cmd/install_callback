@@ -16,11 +16,16 @@ fi
 
 max_upload=${wizard_max_upload_bytes:-4294967296}
 max_storage=${wizard_max_storage_bytes:-107374182400}
-case "$max_upload:$max_storage" in
-  *[!0-9:]*|0:*|*:0) echo "Storage limits must be positive integers." > "$TRIM_TEMP_LOGFILE"; exit 1 ;;
+retention_days=${wizard_retention_days:-30}
+case "$max_upload:$max_storage:$retention_days" in
+  *[!0-9:]*|0:*|*:0:*) echo "Storage limits must be positive integers." > "$TRIM_TEMP_LOGFILE"; exit 1 ;;
 esac
 if [ "$max_storage" -lt "$max_upload" ]; then
   echo "Total storage quota must be greater than or equal to the single-file limit." > "$TRIM_TEMP_LOGFILE"
+  exit 1
+fi
+if [ "$retention_days" -gt 36500 ]; then
+  echo "Retention days must be between 0 and 36500." > "$TRIM_TEMP_LOGFILE"
   exit 1
 fi
 
@@ -28,4 +33,5 @@ cat > "$TRIM_PKGETC/otrans.conf" <<EOF
 OTRANS_ADMIN_TOKEN=$wizard_admin_token
 OTRANS_MAX_UPLOAD_BYTES=$max_upload
 OTRANS_MAX_STORAGE_BYTES=$max_storage
+OTRANS_RETENTION_DAYS=$retention_days
 EOF

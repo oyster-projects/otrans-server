@@ -11,6 +11,8 @@ import (
 const (
 	defaultMaxUploadBytes  int64 = 4 * 1024 * 1024 * 1024
 	defaultMaxStorageBytes int64 = 100 * 1024 * 1024 * 1024
+	defaultRetentionDays         = 30
+	maxRetentionDays             = 36500
 )
 
 type Config struct {
@@ -21,6 +23,7 @@ type Config struct {
 	AdminToken      string
 	MaxUploadBytes  int64
 	MaxStorageBytes int64
+	RetentionDays   int
 }
 
 func Load() (Config, error) {
@@ -54,6 +57,14 @@ func Load() (Config, error) {
 	if maxStorageBytes < maxUploadBytes {
 		return Config{}, errors.New("OTRANS_MAX_STORAGE_BYTES must be greater than or equal to OTRANS_MAX_UPLOAD_BYTES")
 	}
+	retentionDays := defaultRetentionDays
+	if raw := strings.TrimSpace(os.Getenv("OTRANS_RETENTION_DAYS")); raw != "" {
+		parsed, parseErr := strconv.Atoi(raw)
+		if parseErr != nil || parsed < 0 || parsed > maxRetentionDays {
+			return Config{}, errors.New("OTRANS_RETENTION_DAYS must be an integer between 0 and 36500")
+		}
+		retentionDays = parsed
+	}
 
 	return Config{
 		ListenAddr:      envOrDefault("OTRANS_LISTEN_ADDR", ":8080"),
@@ -63,6 +74,7 @@ func Load() (Config, error) {
 		AdminToken:      adminToken,
 		MaxUploadBytes:  maxUploadBytes,
 		MaxStorageBytes: maxStorageBytes,
+		RetentionDays:   retentionDays,
 	}, nil
 }
 

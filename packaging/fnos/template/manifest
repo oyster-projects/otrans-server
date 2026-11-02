@@ -1,5 +1,5 @@
 appname=OTrans
-version=0.5.2
+version=0.5.3
 display_name=OTrans 中转站
 desc=基于飞牛 fnOS 的 OTrans 跨设备文本与文件中转服务。
 source=thirdparty
@@ -11,4 +11,4 @@ ctl_stop=true
 service_port=@@SERVICE_PORT@@
 checkport=true
 disable_authorization_path=true
-changelog=安全加固：升级 Go 安全工具链，增加限流、存储配额、设备撤销、请求边界和持续漏洞扫描。
+changelog=增加可配置的中转内容自动删除周期，并提供安全加固的 Docker 部署版本。

@@ -153,7 +153,9 @@ async function loadAdminStatus() {
     });
     const payload = await response.json();
     if (!response.ok) return;
-    health.textContent = `服务正常 · 实时 ${payload.activeRealtimeConnections ?? 0} · 存储 ${formatBytes(payload.storageBytes || 0)} / ${formatBytes(payload.maxStorageBytes || 0)}`;
+    const retention = Number(payload.retentionDays || 0);
+    const retentionText = retention > 0 ? `保留 ${retention} 天` : '自动删除已关闭';
+    health.textContent = `服务正常 · 实时 ${payload.activeRealtimeConnections ?? 0} · 存储 ${formatBytes(payload.storageBytes || 0)} / ${formatBytes(payload.maxStorageBytes || 0)} · ${retentionText}`;
   } catch (_) { /* 健康检查仍会显示基础在线状态。 */ }
 }
 

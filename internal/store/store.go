@@ -556,6 +556,87 @@ WHERE t.status = 'draft' AND julianday(t.created_at) < julianday(?) AND i.kind =
 	return digests, nil
 }
 
+// DeleteExpiredTransfers globally deletes committed transfers older than the
+// cutoff. It creates the same tombstone events as an explicit client deletion
+// so every device converges on the automatic deletion.
+func (s *Store) DeleteExpiredTransfers(ctx context.Context, committedBefore time.Time) (int, []string, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, nil, err
+	}
+	defer tx.Rollback()
+	cutoff := formatTime(committedBefore.UTC())
+
+	rows, err := tx.QueryContext(ctx, `
+SELECT id FROM transfers
+WHERE status = 'committed' AND deleted_at IS NULL
+  AND julianday(committed_at) < julianday(?)
+ORDER BY committed_at`, cutoff)
+	if err != nil {
+		return 0, nil, err
+	}
+	ids := make([]string, 0)
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			_ = rows.Close()
+			return 0, nil, err
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Close(); err != nil {
+		return 0, nil, err
+	}
+	if len(ids) == 0 {
+		if err := tx.Commit(); err != nil {
+			return 0, nil, err
+		}
+		return 0, nil, nil
+	}
+
+	digestRows, err := tx.QueryContext(ctx, `
+SELECT DISTINCT i.sha256 FROM items i
+JOIN transfers t ON t.id = i.transfer_id
+WHERE t.status = 'committed' AND t.deleted_at IS NULL
+  AND julianday(t.committed_at) < julianday(?) AND i.kind = 'file'`, cutoff)
+	if err != nil {
+		return 0, nil, err
+	}
+	digests := make([]string, 0)
+	for digestRows.Next() {
+		var digest string
+		if err := digestRows.Scan(&digest); err != nil {
+			_ = digestRows.Close()
+			return 0, nil, err
+		}
+		digests = append(digests, digest)
+	}
+	if err := digestRows.Close(); err != nil {
+		return 0, nil, err
+	}
+
+	deletedAt := formatTime(s.now().UTC())
+	for _, id := range ids {
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE transfers SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL`, deletedAt, id); err != nil {
+			return 0, nil, err
+		}
+		payload, err := json.Marshal(map[string]string{"id": id, "deletedAt": deletedAt})
+		if err != nil {
+			return 0, nil, err
+		}
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO events(type, transfer_id, payload, created_at) VALUES('transfer.deleted', ?, ?, ?)`,
+			id, string(payload), deletedAt); err != nil {
+			return 0, nil, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, nil, err
+	}
+	return len(ids), digests, nil
+}
+
 func (s *Store) CommitTransfer(ctx context.Context, transferID string, deviceID string) (Transfer, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {

@@ -1,0 +1,9 @@
+.git
+.github
+.env
+bin
+data
+dist
+tmp
+*.fpk
+*.log
